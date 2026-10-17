@@ -1,0 +1,73 @@
+# ── Dependencies ────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.*
+.venv/
+venv/
+
+# ── Build output ────────────────────────────────────────────────
+.next/
+out/
+build/
+dist/
+.turbo/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+*.egg-info/
+
+# ── Python caches ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── Tests ───────────────────────────────────────────────────────
+coverage/
+test-results/
+playwright-report/
+
+# ── Environment / secrets ───────────────────────────────────────
+# Real values never go in git. Each app ships a committed .env.example.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Large assets ────────────────────────────────────────────────
+# Scans, photos and renders live in Supabase Storage, not git.
+# See docs/decisions/0002-large-assets-outside-git.md.
+apps/web/public/scans/
+*.usdz
+*.glb
+*.gltf
+*.ply
+*.splat
+*.las
+*.laz
+*.e57
+*.obj
+*.fbx
+
+# ── Logs ────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+.pnpm-debug.log*
+
+# ── OS / editors ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# ── Local tooling ───────────────────────────────────────────────
+.claude/settings.local.json
+
+LICENSE
+
+CONTRIBUTING.md
