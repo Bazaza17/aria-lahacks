@@ -26,6 +26,18 @@ The code came from Aria's Miami build. This weekend:
 
 Every file involved, plus the Supabase steps: `docs/lahacks/07-changes.md`.
 
+## Kickoff: questions first, then setup
+
+At the start of the first session, and whenever I say **"questions"**:
+
+1. **Ask me everything that's still pending** so we can narrow the plan: the Open list in `docs/lahacks/01-decisions.md`, "Still to make" in `docs/lahacks/05-plan.md`, the brackets in this file, and what venue data I have so far (`docs/lahacks/06-venue-data.md`). Ask lots of questions, a few at a time, multiple choice where it fits (the AskUserQuestion tool), with your recommendation first when you have one. Write my answers into `01-decisions.md`, then narrow `05-plan.md` into a concrete first slice.
+2. **Then do the setup.** Every step is in `docs/lahacks/07-changes.md`:
+   - The new Supabase project: migrations `0001`, `0002` and `0004` (skip `0003`), the public `scans` bucket, and the venue row with the right address and coordinates. If you can reach the database (Supabase MCP, CLI or `psql`), run it; otherwise give me the SQL to paste into the SQL editor.
+   - Mapbox: the token in `apps/web/.env.local`, and the dashboard map centered on the venue instead of Miami.
+   - The env files for web, API and agents.
+
+   Ask me for each value you need (project URL, keys, coordinates, Mapbox token). Secrets go only in the gitignored env files; never commit them or repeat them back.
+
 ## Commands
 
 - Env files: copy each `.env.example` to `apps/web/.env.local`, `apps/api/.env` and `apps/agents/.env`.
@@ -55,6 +67,15 @@ This is a time-boxed hackathon. These instructions override the global ECC rules
 7. **Keep the app runnable at all times.** After each change, make sure it still builds (`pnpm --dir apps/web build`) and the API and agents still start. If something breaks, fixing it is the top priority.
 8. **Commit often** with short conventional messages (`feat:`, `fix:`) so we can roll back.
 
+## ECC
+
+My global ECC setup (agents, skills, commands and the GateGuard hook) is installed. The priorities above override its rules where they conflict.
+
+- **Commands I drive with:** `/plan-prd` and `/plan` to plan; `/orch-add-feature`, `/orch-change-feature` and `/orch-fix-defect` for features and bugs; `/build-fix` (`/react-build` for Next.js build failures); `/code-review`, `/prp-commit` and `/pr`. For long runs, `/goal` and `/loop`.
+- **Skills to use when they fit:** `browser-qa` for "demo check"; `documentation-lookup` for current docs (Next.js 16, React 19, Mapbox GL, Supabase, uAgents); `council` when we're stuck between two approaches; `frontend-design-direction` and `make-interfaces-feel-better` for UI polish; `frontend-slides` for the pitch deck; `tdd-workflow` only for logic that keeps breaking.
+- **Agents:** `security-reviewer` for the leaked-keys check before submitting; `code-reviewer` only when I ask (priority 3).
+- **GateGuard** asks for facts once per new file. Just answer it; I can start Claude with `ECC_GATEGUARD=off` if it's slowing us down.
+
 ## Non-negotiables (even in a rush)
 
 - Never hardcode secrets or API keys. Use `.env` / `.env.local` and the host's environment variables; `.env*` is already in `.gitignore`.
@@ -73,13 +94,14 @@ This is a time-boxed hackathon. These instructions override the global ECC rules
 
 ## Parallel sessions
 
-Three people, each running their own sessions (a separate clone, or one worktree per session). Stay inside your assigned area and don't edit files owned by another session:
+Three people, each running their own sessions. Per person, keep it to 2–3 sessions at a time (more burns usage fast), each in its own worktree (desktop app: new session → Local → worktree). `.worktreeinclude` copies the env files into new worktrees. Stay inside your assigned area and don't edit files owned by another session:
 
 - **[Name] — Engine:** `packages/engine/` (world model, routes, fire, crowd sim)
 - **[Name] — Agents and API:** `apps/agents/`, `apps/api/`, Supabase
 - **[Name] — Web:** `apps/web/` (viewer, map, report)
+- **[Who] — Non-code:** pitch deck, README, demo script, Devpost
 
-Shared contracts: the report schema lives in `apps/api/app/agent/prompts.py` and is copied by hand into `apps/web/lib/types.ts`; the database lives in `infra/supabase/migrations/`. Say so before changing either.
+Shared contracts: the report schema lives in `apps/api/app/agent/prompts.py` and is copied by hand into `apps/web/lib/types.ts`; the database lives in `infra/supabase/migrations/`. Say so before changing either, and when you do change one, tell whoever depends on it. Sessions on the same machine can message each other ("tell the web session the report schema changed").
 
 [edit to match the actual split]
 
