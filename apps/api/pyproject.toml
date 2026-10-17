@@ -1,0 +1,40 @@
+[project]
+name = "api"
+version = "0.1.0"
+description = "Pre-incident planning agent API"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.102.0",
+    "fastapi>=0.136.1",
+    "httpx>=0.28.1",
+    "pydantic>=2",
+    "python-dotenv>=1.2.2",
+    "slowapi>=0.1.9",
+    "supabase>=2.30.0",
+    "uvicorn[standard]>=0.47.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.15.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# The long system prompt and demo stub strings are prose, not code.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# These load .env before importing modules that read env vars at import time.
+"app/main.py" = ["E402"]
+"scripts/*.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
