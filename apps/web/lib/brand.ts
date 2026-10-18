@@ -21,6 +21,3 @@ export const LEGAL = {
 } as const;
 
 export const COPYRIGHT_NOTICE = `Copyright © ${LEGAL.copyrightYear} ${LEGAL.owner}. MIT License.`;
-
-/** Uppercase wordmark used in the mono UI chrome (e.g. "ARIA"). */
-export const BRAND_WORDMARK = BRAND.name.toUpperCase();

@@ -1,17 +1,48 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
-import { formatClock, loadSizeUp, type SizeUp } from "@/lib/scan-fire";
+import { formatClock, isVenue, loadSizeUp, type SizeUp } from "@/lib/scan-fire";
 import type { Building } from "@/lib/supabase";
 
-/** The venue's pre-plan headline, straight from the engine's default scenario. */
+/** One docked-panel section: caps label left, /0.n marker right. */
+export function PanelSection({
+  label,
+  n,
+  children,
+}: {
+  label: string;
+  n: number;
+  children: ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-3.5 border-b border-rule px-5 pt-[18px] pb-5">
+      <div className="caps flex items-center justify-between text-[11px]">
+        <span className="text-quiet">{label}</span>
+        <span className="text-faint">/0.{n}</span>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Row({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex h-8 items-center justify-between gap-3 border-b border-rule">
+      <span className="flex items-center gap-2 text-[13px] text-quiet">{label}</span>
+      <span className="text-right text-[14px] tabular-nums text-soft">{children}</span>
+    </div>
+  );
+}
+
+/** The selected building's pre-plan, straight from the engine's default scenario. */
 export function VenuePreplanCard({ building }: { building: Building }) {
+  const venue = isVenue(building.id);
   const [sizeUp, setSizeUp] = useState<SizeUp | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (!venue) return;
     let cancelled = false;
     void loadSizeUp(building.id).then((s) => {
       if (cancelled) return;
@@ -21,54 +52,64 @@ export function VenuePreplanCard({ building }: { building: Building }) {
     return () => {
       cancelled = true;
     };
-  }, [building.id]);
+  }, [building.id, venue]);
 
   const firstLost = sizeUp?.exits_lost[0];
   const atStart = sizeUp?.departures[0];
+  // Only the venue has an engine run; /0.1 already says "Pre-plan pending" for the rest.
+  if (!venue) return null;
+
+  const status = sizeUp
+    ? `Leaving at once · Engine`
+    : failed
+      ? "Engine offline"
+      : "Running the engine…";
 
   return (
-    <aside className="absolute bottom-5 left-5 z-10 w-[360px] rounded-md border border-white/[0.08] bg-black/85 font-mono backdrop-blur">
-      <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-2.5 text-[10px] tracking-[0.3em]">
-        <span className="text-white/70">VENUE PRE-PLAN</span>
-        <span className="text-white/35">
-          {sizeUp ? "ENGINE" : failed ? "ENGINE OFFLINE" : "RUNNING…"}
-        </span>
-      </div>
-
-      <div className="px-4 py-3 text-[11px] leading-relaxed">
-        <div className="text-white/85">{building.address}</div>
-        {sizeUp && (
-          <ul className="mt-2 space-y-1 text-white/60">
-            <li>
-              <span className="text-[#ff6b00]">►</span> Fire in {sizeUp.origin.name},{" "}
-              {sizeUp.origin.growth} growth
-            </li>
-            {firstLost && (
-              <li>
-                <span className="text-[#ff6b00]">►</span> First exit lost at{" "}
-                {formatClock(firstLost.lost_s ?? 0)} · {sizeUp.exits_lost.length} of{" "}
-                {sizeUp.exits_total} lost in 15 min
-              </li>
+    <PanelSection label="Pre-plan" n={2}>
+      {sizeUp && (
+        <div className="flex flex-col">
+          <Row label="Fire in">{sizeUp.origin.name.split(" (")[0]}</Row>
+          <Row label="First exit lost">
+            {firstLost?.lost_s != null ? (
+              <span className="text-fire">T+{formatClock(firstLost.lost_s)}</span>
+            ) : (
+              "None"
             )}
-            {atStart && (
-              <li>
-                <span className="text-[#ff6b00]">►</span>{" "}
-                {`Leaving at once: ${atStart.plan.at_risk} at risk on Aria's routes, ${atStart.self.at_risk} on self-chosen routes`}
-              </li>
-            )}
-          </ul>
-        )}
-        {failed && (
-          <div className="mt-2 text-white/40">The engine runs in the API; it is not reachable.</div>
-        )}
-      </div>
-
-      <Link
-        href={`/building/${building.id}`}
-        className="flex items-center justify-between border-t border-white/[0.08] px-4 py-2 text-[10px] tracking-[0.2em] text-[#ff6b00] transition-colors hover:bg-[#ff6b00]/10"
-      >
-        OPEN PRE-PLAN <span aria-hidden>→</span>
-      </Link>
-    </aside>
+          </Row>
+          <Row label="Exits lost in 15 min">
+            {sizeUp.exits_lost.length} / {sizeUp.exits_total}
+          </Row>
+          {atStart && (
+            <>
+              <Row
+                label={
+                  <>
+                    <span aria-hidden className="h-[2px] w-3.5 bg-white" />
+                    At risk on Aria&apos;s routes
+                  </>
+                }
+              >
+                {atStart.plan.at_risk}
+              </Row>
+              <Row
+                label={
+                  <>
+                    <span aria-hidden className="h-[2px] w-3.5 bg-fire" />
+                    At risk finding their own way
+                  </>
+                }
+              >
+                <span className="text-fire">{atStart.self.at_risk}</span>
+              </Row>
+            </>
+          )}
+        </div>
+      )}
+      {failed && (
+        <p className="text-[12px] text-dim">The engine runs in the API; it is not reachable.</p>
+      )}
+      <div className="caps text-[10px] text-dim">{status}</div>
+    </PanelSection>
   );
 }

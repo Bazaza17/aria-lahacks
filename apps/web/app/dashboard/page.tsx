@@ -11,7 +11,8 @@ export default async function DashboardPage() {
     .select("*")
     .order("created_at", { ascending: true });
 
-  // The first building gets the prominent pulse on the map; others get a smaller marker.
+  // The first building gets the square marker on the map and is selected in the panel;
+  // others get a smaller grey dot.
   // Only buildings flagged is_demo are shown for now.
   const demoBuildings = ((data ?? []) as Building[]).filter((b) => b.is_demo);
 

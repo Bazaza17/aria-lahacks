@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { motion, useScroll, useTransform } from "framer-motion";
-import { BRAND, BRAND_WORDMARK, COPYRIGHT_NOTICE } from "@/lib/brand";
+import { BRAND, COPYRIGHT_NOTICE } from "@/lib/brand";
 
 // ── Eclipse globe (backlit sphere, ORCA-style) ───────────────────────────────
 
@@ -26,6 +26,10 @@ function Globe() {
     window.addEventListener("resize", resize);
 
     const W = () => canvas.offsetWidth;
+    // next/font hashes family names, so read the DM Mono stack from its CSS variable once.
+    const monoFamily =
+      getComputedStyle(document.documentElement).getPropertyValue("--font-dm-mono").trim() ||
+      "monospace";
     const H = () => canvas.offsetHeight;
 
     // Light direction: backlit from upper-right, behind the globe (negative z)
@@ -47,13 +51,18 @@ function Globe() {
       [30.27, -97.74, "AUSTIN"],
     ];
 
+    // Tip the north pole toward the viewer so the US cities sit near mid-globe, as on the screen.
+    const TILT = 0.6;
+    const cosT = Math.cos(TILT);
+    const sinT = Math.sin(TILT);
+    const tilt = (y: number, z: number) => [y * cosT - z * sinT, y * sinT + z * cosT] as const;
+
     function project(lat: number, lng: number, cx: number, cy: number, r: number) {
       const phi = (90 - lat) * (Math.PI / 180);
       const theta = (lng + 180 + angle) * (Math.PI / 180);
       // Negated so east draws to the right of west (otherwise the globe is mirrored).
       const ux = -Math.sin(phi) * Math.cos(theta);
-      const uy = Math.cos(phi);
-      const uz = Math.sin(phi) * Math.sin(theta);
+      const [uy, uz] = tilt(Math.cos(phi), Math.sin(phi) * Math.sin(theta));
       return { ux, uy, uz, sx: cx + ux * r, sy: cy - uy * r };
     }
 
@@ -88,9 +97,8 @@ function Globe() {
         const iy = ay + (by - ay) * t2;
         const iz = az + (bz - az) * t2;
         const im = Math.hypot(ix, iy, iz);
-        const nx = ix / im,
-          ny = iy / im,
-          nz = iz / im;
+        const nx = ix / im;
+        const [ny, nz] = tilt(iy / im, iz / im);
         if (nz < 0) {
           started = false;
           continue;
@@ -102,53 +110,29 @@ function Globe() {
           started = true;
         } else ctx.lineTo(px, py);
       }
-      ctx.strokeStyle = `rgba(255,107,0,${opacity})`;
+      ctx.strokeStyle = `rgba(255,255,255,${opacity})`;
       ctx.lineWidth = 0.7;
       ctx.stroke();
     }
 
-    function draw(t: number) {
+    function draw() {
       ctx.clearRect(0, 0, W(), H());
 
       const wide = W() > 900;
-      const cx = wide ? W() * 0.82 : W() * 0.5;
+      const cx = wide ? W() * 0.775 : W() * 0.5;
       const cy = wide ? H() * 0.5 : H() * 0.34;
-      const r = wide ? Math.min(H() * 0.62, W() * 0.46) : Math.min(W(), H()) * 0.36;
+      const r = wide ? Math.min(H() * 0.42, W() * 0.3) : Math.min(W(), H()) * 0.36;
 
       angle += 0.03; // slower, smoother rotation
 
-      // ── Atmosphere glow (behind sphere) ──
-      const glowX = cx + 0.62 * r;
-      const glowY = cy - 0.78 * r;
-      const pulse = (Math.sin(t * 0.0012) + 1) / 2;
-      const g1 = ctx.createRadialGradient(glowX, glowY, r * 0.1, glowX, glowY, r * 1.5);
-      g1.addColorStop(0, `rgba(255,120,20,${0.5 + pulse * 0.12})`);
-      g1.addColorStop(0.4, "rgba(255,90,0,0.16)");
-      g1.addColorStop(1, "rgba(255,90,0,0)");
-      ctx.fillStyle = g1;
-      ctx.fillRect(0, 0, W(), H());
-
-      // Thin full rim halo.
-      const ring = ctx.createRadialGradient(cx, cy, r * 0.92, cx, cy, r * 1.18);
-      ring.addColorStop(0, "rgba(255,107,0,0)");
-      ring.addColorStop(0.5, "rgba(255,107,0,0.10)");
-      ring.addColorStop(1, "rgba(255,107,0,0)");
-      ctx.fillStyle = ring;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * 1.18, 0, Math.PI * 2);
-      ctx.fill();
-
-      // ── Sphere body ──
-      const bodyX = cx + L[0] * r * 0.5;
-      const bodyY = cy - L[1] * r * 0.5;
-      const body = ctx.createRadialGradient(bodyX, bodyY, r * 0.1, cx, cy, r);
-      body.addColorStop(0, "rgba(26,22,20,1)");
-      body.addColorStop(0.6, "rgba(12,11,12,1)");
-      body.addColorStop(1, "rgba(6,6,8,1)");
+      // ── Sphere body: solid, with a hairline rim ──
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = body;
+      ctx.fillStyle = "#14171a";
       ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
 
       // Clip all subsequent drawing to the sphere.
       ctx.save();
@@ -164,14 +148,11 @@ function Globe() {
           const illum = Math.max(0, ux * L[0] + uy * L[1] + uz * L[2]);
           const k = Math.pow(illum, 1.5);
           const front = Math.min(1, (uz + 0.42) / 1.42);
-          const rC = Math.round(60 + (255 - 60) * k);
-          const gC = Math.round(55 + (110 - 55) * k);
-          const bC = Math.round(58 - 58 * k);
-          const opacity = 0.08 + front * 0.22 + k * 0.5;
+          const opacity = 0.06 + front * 0.28;
           const size = 0.6 + front * 0.7 + k * 1.1;
           ctx.beginPath();
           ctx.arc(sx, sy, size, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${rC},${gC},${bC},${Math.min(1, opacity)})`;
+          ctx.fillStyle = `rgba(255,255,255,${Math.min(1, opacity)})`;
           ctx.fill();
         }
       }
@@ -194,51 +175,22 @@ function Globe() {
         const isPrimary = i === 0;
         const fade = Math.min(1, (uz - 0.05) / 0.25);
 
-        // Pulse ring
-        const pp = (Math.sin(t * 0.003 + i * 1.3) + 1) / 2;
-        const pulseR = (isPrimary ? 9 : 5) + pp * (isPrimary ? 12 : 6);
-        ctx.beginPath();
-        ctx.arc(sx, sy, pulseR, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(255,107,0,${fade * (0.35 - pp * 0.28)})`;
-        ctx.lineWidth = isPrimary ? 1.5 : 1;
-        ctx.stroke();
-
-        // Second static ring
-        ctx.beginPath();
-        ctx.arc(sx, sy, isPrimary ? 7 : 4, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(255,107,0,${fade * 0.5})`;
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
-
-        // Crosshair lines
-        const ch = isPrimary ? 10 : 6;
-        const gap = isPrimary ? 4 : 2.5;
-        ctx.strokeStyle = `rgba(255,107,0,${fade * 0.6})`;
-        ctx.lineWidth = 0.8;
-        [
-          [1, 0],
-          [-1, 0],
-          [0, 1],
-          [0, -1],
-        ].forEach(([dx, dy]) => {
-          ctx.beginPath();
-          ctx.moveTo(sx + dx * gap, sy + dy * gap);
-          ctx.lineTo(sx + dx * (gap + ch), sy + dy * (gap + ch));
-          ctx.stroke();
-        });
-
-        // Solid centre dot
-        ctx.beginPath();
-        ctx.arc(sx, sy, isPrimary ? 3 : 1.8, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,107,0,${fade})`;
-        ctx.fill();
+        // Square markers: Los Angeles gets a 6px square inside a 22px outline.
+        const size = isPrimary ? 6 : 4;
+        ctx.fillStyle = `rgba(255,255,255,${fade})`;
+        ctx.fillRect(sx - size / 2, sy - size / 2, size, size);
+        if (isPrimary) {
+          ctx.strokeStyle = `rgba(255,255,255,${fade * 0.6})`;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(sx - 11, sy - 11, 22, 22);
+        }
 
         // Label
         if (isPrimary || uz > 0.25) {
-          ctx.font = `${isPrimary ? 600 : 400} ${isPrimary ? 9 : 8}px monospace`;
-          ctx.fillStyle = `rgba(255,107,0,${fade * (isPrimary ? 0.9 : 0.55)})`;
-          ctx.letterSpacing = "0.15em";
-          ctx.fillText(label, sx + (isPrimary ? 14 : 10), sy - (isPrimary ? 10 : 7));
+          ctx.font = `${isPrimary ? 500 : 400} 9px ${monoFamily}`;
+          ctx.fillStyle = `rgba(255,255,255,${fade * 0.7})`;
+          ctx.letterSpacing = "0.05em";
+          ctx.fillText(label, sx + (isPrimary ? 14 : 8), sy - (isPrimary ? 10 : 6));
         }
       });
 
@@ -255,7 +207,7 @@ function Globe() {
   return <canvas ref={canvasRef} className="h-full w-full block" />;
 }
 
-// Floating hazard alert cards anchored over the globe (ORCA-style).
+// Floating hazard alert cards anchored over the globe.
 function AlertCard({
   title,
   place,
@@ -269,27 +221,20 @@ function AlertCard({
 }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12, scale: 0.96 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, delay, ease: "easeOut" }}
-      className={`absolute z-[5] w-52 ${className}`}
+      className={`absolute z-[5] w-60 ${className}`}
     >
-      <div className="rounded-md border border-[#ff6b00]/25 bg-black/70 p-3 backdrop-blur-sm shadow-[0_8px_30px_-10px_rgba(255,107,0,0.4)]">
-        <div className="mb-2 flex items-center gap-2">
-          <motion.span
-            animate={{ opacity: [1, 0.3, 1] }}
-            transition={{ repeat: Infinity, duration: 1.8 }}
-            className="h-1.5 w-1.5 rounded-full bg-[#ff6b00]"
-          />
-          <span className="font-mono text-[10px] tracking-[0.2em] text-[#ff6b00]">{title}</span>
-        </div>
-        <div className="font-mono text-sm font-medium tracking-[0.15em] text-white/90">{place}</div>
-        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
+      <div className="flex flex-col gap-[10px] bg-[rgb(29_31_34/0.88)] px-4 py-[14px]">
+        <span className="caps text-[11px] text-soft">{title}</span>
+        <span className="text-[20px] leading-[24px] text-fg">{place}</span>
+        <div className="h-[2px] w-full overflow-hidden bg-[#2e3236]">
           <motion.div
             initial={{ width: "0%" }}
             animate={{ width: "78%" }}
             transition={{ duration: 1.2, delay: delay + 0.3 }}
-            className="h-full bg-[#ff6b00]/70"
+            className="h-full bg-white"
           />
         </div>
       </div>
@@ -299,38 +244,57 @@ function AlertCard({
 
 // ── Shared primitives ────────────────────────────────────────────────────────
 
-function SectionLabel({ children, center }: { children: React.ReactNode; center?: boolean }) {
+/** A caps label. With a marker it becomes the content sections' full-width ruled row. */
+function SectionLabel({
+  children,
+  center,
+  marker,
+}: {
+  children: React.ReactNode;
+  center?: boolean;
+  marker?: string;
+}) {
+  if (marker) {
+    return (
+      <div className="caps mb-20 flex justify-between border-t border-rule-light pt-[10px] text-[12px] text-dim">
+        <span>{children}</span>
+        <span>{marker}</span>
+      </div>
+    );
+  }
   return (
-    <div
-      className={`mb-5 flex items-center gap-3 font-mono text-xs tracking-[0.3em] text-[#ff6b00] ${center ? "justify-center" : ""}`}
-    >
-      <span className="h-px w-6 bg-[#ff6b00]" />
+    <div className={`caps mb-5 text-[12px] text-soft ${center ? "text-center" : ""}`}>
       {children}
-      {center && <span className="h-px w-6 bg-[#ff6b00]" />}
     </div>
   );
 }
 
 function StatCard({ value, label }: { value: string; label: string }) {
   return (
-    <div className="rounded-sm border border-white/[0.07] bg-white/[0.02] p-6">
-      <div className="mb-1 font-mono text-3xl font-semibold text-[#ff6b00]">{value}</div>
-      <div className="text-sm leading-relaxed text-white/50">{label}</div>
+    <div>
+      <div className="text-[44px] leading-[48px] tracking-[-0.035em] text-ink tabular-nums md:text-[60px] md:leading-[60px]">
+        {value}
+      </div>
+      <div className="mt-3 text-[15px] leading-[22px] text-faint">{label}</div>
     </div>
   );
 }
 
 function Step({ n, title, body }: { n: string; title: string; body: string }) {
   return (
-    <div className="flex gap-5">
-      <div className="w-5 shrink-0 pt-0.5 font-mono text-xs text-[#ff6b00]/40">{n}</div>
+    <div className="flex gap-6 border-t border-rule-light py-[18px]">
+      <div className="caps w-8 shrink-0 pt-1.5 text-[12px] text-dim">{n}</div>
       <div>
-        <div className="mb-1 text-sm font-medium text-white">{title}</div>
-        <div className="text-sm leading-relaxed text-white/50">{body}</div>
+        <div className="mb-1 text-[22px] leading-[28px] tracking-[-0.01em] text-ink">{title}</div>
+        <div className="text-[15px] leading-[22px] text-faint">{body}</div>
       </div>
     </div>
   );
 }
+
+const H2 =
+  "text-4xl font-normal leading-[1.1] tracking-[-0.025em] md:text-[52px] md:leading-[58px]";
+const BODY = "text-[17px] leading-[27px] text-faint";
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
@@ -343,7 +307,7 @@ export default function LandingPage() {
   return (
     <div
       ref={containerRef}
-      className="h-screen overflow-y-scroll bg-black text-white"
+      className="h-screen overflow-y-scroll bg-page text-fg"
       style={{ scrollSnapType: "y proximity" }}
     >
       {/* HERO */}
@@ -355,27 +319,25 @@ export default function LandingPage() {
           <Globe />
           <AlertCard
             title="STRUCTURE FIRE"
-            place="WESTWOOD"
-            className="right-[20%] top-[26%]"
+            place="Westwood"
+            className="right-[25%] top-[26%]"
             delay={0.9}
           />
           <AlertCard
             title="RED FLAG WARNING"
-            place="LOS ANGELES"
-            className="right-[5%] top-[48%]"
+            place="Los Angeles"
+            className="right-[2%] top-[71%]"
             delay={1.3}
           />
         </motion.div>
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-page to-transparent" />
 
         <div className="relative z-10 flex items-center justify-between px-8 pt-7">
-          <span className="font-mono text-xs tracking-[0.3em] text-white/40">{BRAND_WORDMARK}</span>
-          <span className="font-mono text-xs tracking-[0.2em] text-white/25">
-            PRE-INCIDENT INTELLIGENCE
-          </span>
+          <span className="text-[19px] font-medium text-fg">{BRAND.name}</span>
+          <span className="caps text-[12px] text-quiet">Pre-incident intelligence</span>
         </div>
 
-        <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-8 md:px-16">
+        <div className="relative z-10 mx-auto flex w-full max-w-[1200px] flex-1 flex-col justify-center px-8 xl:px-0">
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -387,15 +349,15 @@ export default function LandingPage() {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.1 }}
-            className="max-w-4xl text-balance text-5xl font-medium leading-[1.05] tracking-tight md:text-7xl"
+            className="max-w-[720px] text-5xl font-normal leading-[1.05] tracking-[-0.03em] md:text-[72px] md:leading-[76px]"
           >
-            Know the building <span className="text-white/40">before the truck arrives.</span>
+            Know the building <span className="text-dim md:block">before the truck arrives.</span>
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.25 }}
-            className="mt-7 max-w-xl text-lg leading-relaxed text-white/55"
+            className="mt-7 max-w-[560px] text-[18px] leading-[28px] text-soft"
           >
             {BRAND.name} turns a phone scan of a building into a fire pre-plan: how fire spreads
             room by room, which exits stay open, how long everyone takes to get out, and a size-up a
@@ -409,18 +371,16 @@ export default function LandingPage() {
           >
             <Link
               href="/dashboard"
-              className="group inline-flex items-center gap-3 rounded-sm bg-[#ff6b00] px-6 py-3 text-sm font-medium tracking-wide text-black transition-colors hover:bg-[#ff7f1f]"
+              className="inline-flex h-11 items-center gap-3 bg-white px-[22px] text-[15px] text-ink transition-colors hover:bg-rule-light"
             >
               Open Dashboard
-              <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
-                →
-              </span>
+              <span aria-hidden>→</span>
             </Link>
             <button
               onClick={() =>
                 containerRef.current?.scrollBy({ top: window.innerHeight, behavior: "smooth" })
               }
-              className="font-mono text-xs tracking-[0.2em] text-white/30 transition-colors hover:text-white/60"
+              className="caps text-[12px] text-quiet transition-colors hover:text-fg"
             >
               LEARN MORE ↓
             </button>
@@ -428,144 +388,135 @@ export default function LandingPage() {
         </div>
 
         <div className="relative z-10 flex justify-center pb-8">
-          <motion.div
-            animate={{ y: [0, 6, 0] }}
-            transition={{ repeat: Infinity, duration: 2.2, ease: "easeInOut" }}
-            className="font-mono text-[10px] tracking-[0.3em] text-white/20"
-          >
-            SCROLL
-          </motion.div>
+          <div className="caps text-[11px] text-faint">SCROLL</div>
         </div>
       </section>
 
-      {/* PROBLEM */}
-      <section
-        className="flex min-h-screen items-center px-8 py-24 md:px-16"
-        style={{ scrollSnapAlign: "start" }}
-      >
-        <div className="mx-auto grid w-full max-w-5xl items-center gap-16 md:grid-cols-2">
-          <div>
-            <SectionLabel>THE PROBLEM</SectionLabel>
-            <h2 className="mb-7 text-4xl font-medium leading-[1.1] tracking-tight md:text-5xl">
-              Firefighters size up on the curb.
-            </h2>
-            {/* Sources: CAL FIRE incident pages for the Palisades and Eaton fires (6,845 + 9,419
-                structures destroyed); Governor's proclamation, Jan 2026 (31 lives lost); LAFD
-                "Our Mission" page (470,274 incidents in 2021); NFPA US Fire Department Profile
-                2020 (29,452 departments); LA County 2023 building footprints layer (3,310,548). */}
-            <p className="mb-6 leading-relaxed text-white/50">
-              In January 2025 the Palisades and Eaton fires destroyed{" "}
-              <span className="text-white/80">more than 16,000 structures</span> across Los Angeles
-              County and took 31 lives. On every call, crews still walk into buildings they have
-              never been inside, with no plan for how the fire will move or which exits will hold.
-            </p>
-            <p className="leading-relaxed text-white/50">
-              The size-up happens on the curb, in the first minutes, from what crews can see from
-              outside. {BRAND.name} does the work before the call: how this building burns, which
-              exits it loses and when, and who is still inside.
-            </p>
+      {/* The problem and How it works share one white band, so no seam shows between them. */}
+      <div className="bg-white text-ink">
+        {/* PROBLEM */}
+        <section className="px-8 py-[120px] md:px-16" style={{ scrollSnapAlign: "start" }}>
+          <div className="mx-auto w-full max-w-[1200px]">
+            <SectionLabel marker="/0.1">THE PROBLEM</SectionLabel>
+            <div className="grid items-start gap-16 md:grid-cols-2">
+              <div>
+                <h2 className={`mb-7 ${H2}`}>Firefighters size up on the curb.</h2>
+                {/* Sources: CAL FIRE incident pages for the Palisades and Eaton fires (6,845 + 9,419
+                  structures destroyed); Governor's proclamation, Jan 2026 (31 lives lost); LAFD
+                  "Our Mission" page (470,274 incidents in 2021); NFPA US Fire Department Profile
+                  2020 (29,452 departments); LA County 2023 building footprints layer (3,310,548). */}
+                <p className={`mb-6 ${BODY}`}>
+                  In January 2025 the Palisades and Eaton fires destroyed{" "}
+                  <span className="text-ink">more than 16,000 structures</span> across Los Angeles
+                  County and took 31 lives. On every call, crews still walk into buildings they have
+                  never been inside, with no plan for how the fire will move or which exits will
+                  hold.
+                </p>
+                <p className={BODY}>
+                  The size-up happens on the curb, in the first minutes, from what crews can see
+                  from outside. {BRAND.name} does the work before the call: how this building burns,
+                  which exits it loses and when, and who is still inside.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-x-10 gap-y-12">
+                <StatCard
+                  value="16,000+"
+                  label="structures destroyed in the January 2025 LA fires"
+                />
+                <StatCard value="470K+" label="incidents LAFD answered in 2021" />
+                <StatCard
+                  value="63"
+                  label="spaces in the venue model, from the scan and floor plan"
+                />
+                <StatCard value="14" label="exterior exits, each checked against the fire clock" />
+              </div>
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <StatCard value="16,000+" label="structures destroyed in the January 2025 LA fires" />
-            <StatCard value="470K+" label="incidents LAFD answered in 2021" />
-            <StatCard value="63" label="spaces in the venue model, from the scan and floor plan" />
-            <StatCard value="14" label="exterior exits, each checked against the fire clock" />
-          </div>
-        </div>
-      </section>
+        </section>
 
-      {/* HOW IT WORKS */}
-      <section
-        className="flex min-h-screen items-center px-8 py-24 md:px-16"
-        style={{ scrollSnapAlign: "start" }}
-      >
-        <div className="mx-auto grid w-full max-w-5xl items-center gap-16 md:grid-cols-2">
-          <div className="space-y-8">
-            <Step
-              n="01"
-              title="Scan the building"
-              body="Capture rooms with a phone LiDAR scan and stitch them into one model. The floor plan fills in the rest of the building, floor by floor."
-            />
-            <div className="h-px bg-white/[0.06]" />
-            <Step
-              n="02"
-              title="The engine runs the fire"
-              body="Pick any room as the fire's start. Fire and smoke spread through the building model room by room, and the engine times when each room becomes untenable and each exit is lost."
-            />
-            <div className="h-px bg-white/[0.06]" />
-            <Step
-              n="03"
-              title="Routes and who is at risk"
-              body="Every occupied room gets a route out that books door and stair capacity, compared with the routes people would pick themselves: who is at risk, how long everyone takes to get out, which ways down each floor has."
-            />
-            <div className="h-px bg-white/[0.06]" />
-            <Step
-              n="04"
-              title="Live response"
-              body="During an incident, CREAO agents run the response: people inside get texts and calls with directions and answers, and a dispatcher console shows it all live."
-            />
+        {/* HOW IT WORKS */}
+        <section className="px-8 pb-[120px] pt-10 md:px-16" style={{ scrollSnapAlign: "start" }}>
+          <div className="mx-auto w-full max-w-[1200px]">
+            <SectionLabel marker="/0.2">HOW IT WORKS</SectionLabel>
+            <div className="grid items-start gap-16 md:grid-cols-2">
+              <div>
+                <Step
+                  n="01"
+                  title="Scan the building"
+                  body="Capture rooms with a phone LiDAR scan and stitch them into one model. The floor plan fills in the rest of the building, floor by floor."
+                />
+                <Step
+                  n="02"
+                  title="The engine runs the fire"
+                  body="Pick any room as the fire's start. Fire and smoke spread through the building model room by room, and the engine times when each room becomes untenable and each exit is lost."
+                />
+                <Step
+                  n="03"
+                  title="Routes and who is at risk"
+                  body="Every occupied room gets a route out that books door and stair capacity, compared with the routes people would pick themselves: who is at risk, how long everyone takes to get out, which ways down each floor has."
+                />
+                <Step
+                  n="04"
+                  title="Live response"
+                  body="During an incident, CREAO agents run the response: people inside get texts and calls with directions and answers, and a dispatcher console shows it all live."
+                />
+              </div>
+              <div>
+                <h2 className={`mb-7 ${H2}`}>
+                  Scan once. <span className="text-dim md:block">Pre-plan every call.</span>
+                </h2>
+                <p className={BODY}>
+                  One building model serves both sides: the pre-plan responders read before the
+                  call, and the live response that guides people out while it happens.
+                </p>
+                <Link
+                  href="/dashboard"
+                  className="mt-8 inline-block text-[17px] text-ink underline underline-offset-4"
+                >
+                  ↳ Open the dashboard
+                </Link>
+              </div>
+            </div>
           </div>
-          <div>
-            <SectionLabel>HOW IT WORKS</SectionLabel>
-            <h2 className="mb-7 text-4xl font-medium leading-[1.1] tracking-tight md:text-5xl">
-              Scan once. <span className="text-white/40">Pre-plan every call.</span>
-            </h2>
-            <p className="leading-relaxed text-white/50">
-              One building model serves both sides: the pre-plan responders read before the call,
-              and the live response that guides people out while it happens.
-            </p>
-            <Link
-              href="/dashboard"
-              className="group mt-8 inline-flex items-center gap-2 font-mono text-sm tracking-[0.15em] text-[#ff6b00] transition-colors hover:text-[#ff7f1f]"
-            >
-              OPEN THE DASHBOARD →
-            </Link>
-          </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
-      {/* MARKET + USE CASE */}
+      {/* MARKET + USE CASE (-mt-px hides a sub-pixel seam against the white band at fractional scaling) */}
       <section
-        className="flex min-h-screen items-center px-8 py-24 md:px-16"
+        className="relative -mt-px bg-paper-2 px-8 py-[120px] text-ink md:px-16"
         style={{ scrollSnapAlign: "start" }}
       >
-        <div className="mx-auto w-full max-w-5xl">
-          <SectionLabel>MARKET + USE CASE</SectionLabel>
-          <h2 className="mb-4 max-w-2xl text-4xl font-medium leading-[1.1] tracking-tight md:text-5xl">
-            Every building in every city.
-          </h2>
-          <p className="mb-14 max-w-xl leading-relaxed text-white/50">
-            Los Angeles is the wedge. The architecture scales to any city, any building type, any
-            risk profile.
-          </p>
-          <div className="mb-14 grid gap-6 md:grid-cols-2">
+        <div className="mx-auto w-full max-w-[1200px]">
+          <SectionLabel marker="/0.3">MARKET + USE CASE</SectionLabel>
+          <div className="mb-14 grid items-start gap-x-10 gap-y-6 md:grid-cols-3">
+            <h2 className={`md:col-span-2 ${H2}`}>Every building in every city.</h2>
+            <p className="text-[17px] leading-[27px] text-faint">
+              Los Angeles is the wedge. The architecture scales to any city, any building type, any
+              risk profile.
+            </p>
+          </div>
+          <div className="mb-14 grid gap-x-10 gap-y-12 md:grid-cols-3">
             <StatCard value="29,000+" label="fire departments in the United States" />
             <StatCard value="3.3M" label="buildings mapped in Los Angeles County alone" />
           </div>
-          <div className="grid gap-8 border-t border-white/[0.06] pt-12 md:grid-cols-3">
-            <div>
-              <div className="mb-3 font-mono text-xs tracking-[0.25em] text-[#ff6b00]">
-                FIRE &amp; RESCUE
-              </div>
-              <p className="text-sm leading-relaxed text-white/50">
+          <div className="grid gap-x-10 gap-y-8 md:grid-cols-3">
+            <div className="border-t border-[#d9dbde] pt-3">
+              <div className="caps mb-3 text-[12px] text-ink">FIRE &amp; RESCUE</div>
+              <p className="text-[15px] leading-[22px] text-faint">
                 Battalion chiefs get a size-up before the truck leaves the station: where the fire
                 goes, which exits are lost and when, ways down per floor, and rooms to check.
               </p>
             </div>
-            <div>
-              <div className="mb-3 font-mono text-xs tracking-[0.25em] text-[#ff6b00]">
-                EMERGENCY MANAGEMENT
-              </div>
-              <p className="text-sm leading-relaxed text-white/50">
+            <div className="border-t border-[#d9dbde] pt-3">
+              <div className="caps mb-3 text-[12px] text-ink">EMERGENCY MANAGEMENT</div>
+              <p className="text-[15px] leading-[22px] text-faint">
                 Pre-plan schools, venues and high-occupancy buildings before fire season. See how a
                 fire would move through a specific building and how long it takes to clear.
               </p>
             </div>
-            <div>
-              <div className="mb-3 font-mono text-xs tracking-[0.25em] text-[#ff6b00]">
-                BEYOND FIRE
-              </div>
-              <p className="text-sm leading-relaxed text-white/50">
+            <div className="border-t border-[#d9dbde] pt-3">
+              <div className="caps mb-3 text-[12px] text-ink">BEYOND FIRE</div>
+              <p className="text-[15px] leading-[22px] text-faint">
                 Insurance underwriting, CRE due diligence, urban search &amp; rescue. Fire response
                 is the wedge.
               </p>
@@ -580,23 +531,21 @@ export default function LandingPage() {
         style={{ scrollSnapAlign: "start" }}
       >
         <div>
-          <SectionLabel center>TRY IT</SectionLabel>
-          <h2 className="mx-auto mb-8 max-w-2xl text-5xl font-medium leading-[1.05] tracking-tight md:text-6xl">
+          <SectionLabel center>[ TRY IT ]</SectionLabel>
+          <h2 className="mx-auto mb-8 max-w-3xl text-5xl font-normal leading-[1.05] tracking-[-0.03em] md:text-[64px] md:leading-[68px]">
             See it run on a real building.
           </h2>
           <Link
             href="/dashboard"
-            className="group inline-flex items-center gap-3 rounded-sm bg-[#ff6b00] px-8 py-4 text-sm font-medium tracking-wide text-black transition-colors hover:bg-[#ff7f1f]"
+            className="inline-flex h-12 items-center gap-3 bg-white px-[26px] text-[15px] text-ink transition-colors hover:bg-rule-light"
           >
             Open Dashboard
-            <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
-              →
-            </span>
+            <span aria-hidden>→</span>
           </Link>
         </div>
       </section>
 
-      <footer className="border-t border-white/[0.06] px-8 py-8 text-center font-mono text-[11px] tracking-[0.15em] text-white/30">
+      <footer className="caps border-t border-rule px-8 py-8 text-center text-[11px] text-faint">
         {COPYRIGHT_NOTICE}
       </footer>
     </div>

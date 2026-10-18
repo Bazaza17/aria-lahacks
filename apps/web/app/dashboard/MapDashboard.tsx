@@ -3,22 +3,38 @@
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { BRAND_WORDMARK } from "@/lib/brand";
+import { BRAND } from "@/lib/brand";
 import type { Building } from "@/lib/supabase";
 
-import { VenuePreplanCard } from "./VenuePreplanCard";
-
-type PopoverState = {
-  lngLat: [number, number];
-  screen: { x: number; y: number };
-  building: Building;
-} | null;
+import { PanelSection, VenuePreplanCard } from "./VenuePreplanCard";
 
 const VENUE_MATCH_DEG = 0.0005; // ~55m at this latitude
 // James West Alumni Center, UCLA. Used until the venue row loads from Supabase.
 const VENUE_FALLBACK_CENTER: [number, number] = [-118.44520289359974, 34.07026948117506];
+const MAP_ZOOM = 17;
+const MAP_PITCH = 60;
+const MAP_BEARING = -20;
+
+const NUMBER_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"];
+
+/** "One building scanned and ready." (numbers one to nine spelled out). */
+function scannedLine(n: number): string {
+  const count = NUMBER_WORDS[n] ?? String(n);
+  return `${count} building${n === 1 ? "" : "s"} scanned and ready.`;
+}
+
+/** The address up to the first comma is the building's name; the rest is the street address. */
+function splitAddress(address: string): { name: string; rest: string } {
+  const i = address.indexOf(",");
+  if (i < 0) return { name: address, rest: "" };
+  return { name: address.slice(0, i), rest: address.slice(i + 1).trim() };
+}
+
+function formatLngLat([lng, lat]: [number, number]): string {
+  return `${lat.toFixed(4)}, ${lng.toFixed(4)}`.replace(/-/g, "−");
+}
 
 export function MapDashboard({
   buildings,
@@ -28,12 +44,14 @@ export function MapDashboard({
   mapboxToken: string;
 }) {
   const primary = buildings[0] ?? null;
-  const secondary = buildings.slice(1);
+  // Memoised: a new array every render would sit in the map effect's deps and rebuild the map.
+  const secondary = useMemo(() => buildings.slice(1), [buildings]);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
-  const rafRef = useRef<number>(0);
-  const popoverLngLatRef = useRef<[number, number] | null>(null);
-  const [popover, setPopover] = useState<PopoverState>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = buildings.find((b) => b.id === selectedId) ?? primary;
+  const scannedCount = buildings.filter((b) => b.scan_url).length;
+  const center: [number, number] = primary ? [primary.lng, primary.lat] : VENUE_FALLBACK_CENTER;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -44,24 +62,47 @@ export function MapDashboard({
       container: containerRef.current,
       style: "mapbox://styles/mapbox/dark-v11",
       center: primary ? [primary.lng, primary.lat] : VENUE_FALLBACK_CENTER,
-      zoom: 17,
-      pitch: 60,
-      bearing: -20,
+      zoom: MAP_ZOOM,
+      pitch: MAP_PITCH,
+      bearing: MAP_BEARING,
       antialias: true,
       logoPosition: "top-right",
     });
     mapRef.current = map;
 
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "bottom-right");
+    // The map sits in a flex row next to the panel: size it once the layout has settled.
+    map.once("load", () => map.resize());
 
     map.on("error", (e) => {
       console.error("[mapbox-error]", e?.error?.message ?? e);
     });
 
-    const closePopover = () => {
-      popoverLngLatRef.current = null;
-      setPopover(null);
-    };
+    // The venue: a square marker with its name; clicking it selects it like a map click.
+    let marker: mapboxgl.Marker | null = null;
+    if (primary) {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.setAttribute("aria-label", `Select ${splitAddress(primary.address).name}`);
+      el.className = "flex cursor-pointer items-center gap-3";
+      el.innerHTML =
+        '<span class="flex h-11 w-11 items-center justify-center border border-white/60 bg-page/60">' +
+        '<span class="h-2.5 w-2.5 bg-white"></span></span>';
+      const label = document.createElement("span");
+      label.className = "caps text-[11px] text-fg";
+      label.textContent = splitAddress(primary.address).name;
+      el.appendChild(label);
+      el.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        setSelectedId(primary.id);
+      });
+      // Anchor on the square's centre (22px in from the left edge).
+      marker = new mapboxgl.Marker({ element: el, anchor: "left", offset: [-22, 0] })
+        .setLngLat([primary.lng, primary.lat])
+        .addTo(map);
+      // Mapbox sets role="img" on marker elements; keep it announced as a button.
+      el.setAttribute("role", "button");
+    }
 
     const onStyleReady = () => {
       try {
@@ -98,8 +139,8 @@ export function MapDashboard({
           });
         }
 
-        // Primary venue: pulsing ring + bright dot. Other demo buildings get
-        // a smaller, solid orange dot (no pulse) so the primary stays dominant.
+        // Primary venue: a thin white ring and a white dot. Other demo buildings get a
+        // smaller grey dot so the primary stays dominant.
         if (primary) {
           if (!map.getSource("venue-primary")) {
             map.addSource("venue-primary", {
@@ -125,12 +166,13 @@ export function MapDashboard({
               source: "venue-primary",
               type: "circle",
               paint: {
-                "circle-radius": 26,
-                "circle-color": "#ff6b00",
-                "circle-opacity": 0.2,
-                "circle-stroke-color": "#ff6b00",
+                // A faint ring around the 44px square marker, as on the Paper screen.
+                "circle-radius": 46,
+                "circle-color": "#ffffff",
+                "circle-opacity": 0.03,
+                "circle-stroke-color": "#ffffff",
                 "circle-stroke-width": 1,
-                "circle-stroke-opacity": 0.5,
+                "circle-stroke-opacity": 0.3,
               },
             });
           }
@@ -140,30 +182,13 @@ export function MapDashboard({
               source: "venue-primary",
               type: "circle",
               paint: {
-                "circle-radius": 6,
-                "circle-color": "#ff6b00",
-                "circle-stroke-color": "#000",
+                "circle-radius": 5,
+                "circle-color": "#ffffff",
+                "circle-stroke-color": "#0e1013",
                 "circle-stroke-width": 2,
               },
             });
           }
-
-          let phase = 0;
-          const tick = () => {
-            phase = (phase + 0.025) % (Math.PI * 2);
-            const t = (Math.sin(phase) + 1) / 2;
-            const pulseLayer = map.getLayer("venue-pulse") as { type?: string } | undefined;
-            if (pulseLayer && pulseLayer.type === "circle") {
-              try {
-                map.setPaintProperty("venue-pulse", "circle-radius", 22 + t * 28);
-                map.setPaintProperty("venue-pulse", "circle-opacity", 0.32 - t * 0.27);
-              } catch {
-                // ignore — map may be in a transitional state during HMR
-              }
-            }
-            rafRef.current = requestAnimationFrame(tick);
-          };
-          rafRef.current = requestAnimationFrame(tick);
         }
 
         if (secondary.length > 0) {
@@ -187,9 +212,8 @@ export function MapDashboard({
               type: "circle",
               paint: {
                 "circle-radius": 4,
-                "circle-color": "#ff6b00",
-                "circle-opacity": 0.85,
-                "circle-stroke-color": "#000",
+                "circle-color": "#8e9196",
+                "circle-stroke-color": "#0e1013",
                 "circle-stroke-width": 1.5,
               },
             });
@@ -202,6 +226,7 @@ export function MapDashboard({
     if (map.isStyleLoaded()) onStyleReady();
     else map.once("style.load", onStyleReady);
 
+    // Clicking a pre-planned building selects it in the panel; anything else leaves it be.
     map.on("click", (e) => {
       const layerIds = [
         "venue-dot",
@@ -212,132 +237,105 @@ export function MapDashboard({
       const features = layerIds.length
         ? map.queryRenderedFeatures(e.point, { layers: layerIds })
         : [];
-      if (features.length === 0) {
-        closePopover();
-        return;
-      }
-
-      const lngLat: [number, number] = [e.lngLat.lng, e.lngLat.lat];
-      const matched = findClosestBuilding(buildings, lngLat, VENUE_MATCH_DEG);
-      // Only pre-planned buildings open a card; any other building on the map has no data.
-      if (!matched) {
-        closePopover();
-        return;
-      }
-      const anchor: [number, number] = [matched.lng, matched.lat];
-      const p = map.project(anchor);
-
-      popoverLngLatRef.current = anchor;
-      setPopover({
-        lngLat: anchor,
-        screen: { x: p.x, y: p.y },
-        building: matched,
-      });
+      if (features.length === 0) return;
+      const matched = findClosestBuilding(buildings, [e.lngLat.lng, e.lngLat.lat], VENUE_MATCH_DEG);
+      if (matched) setSelectedId(matched.id);
     });
 
-    const onMove = () => {
-      const ll = popoverLngLatRef.current;
-      if (!ll) return;
-      const p = map.project(ll);
-      setPopover((prev) => (prev ? { ...prev, screen: { x: p.x, y: p.y } } : prev));
-    };
-    map.on("move", onMove);
-
     return () => {
-      cancelAnimationFrame(rafRef.current);
-      map.off("move", onMove);
+      marker?.remove();
       map.remove();
       mapRef.current = null;
     };
   }, [mapboxToken, primary, secondary, buildings]);
 
-  // Escape closes popover
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        popoverLngLatRef.current = null;
-        setPopover(null);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  const selectedName = selected ? splitAddress(selected.address) : null;
 
   return (
-    <main className="fixed inset-0 overflow-hidden bg-black text-white">
-      <div
-        ref={containerRef}
-        className="absolute inset-0"
-        style={{ width: "100%", height: "100%" }}
-      />
-
-      {/* Top chrome */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between p-5">
-        <div className="pointer-events-auto flex items-center gap-3 rounded-md border border-white/[0.08] bg-black/75 px-4 py-2 font-mono text-xs tracking-[0.3em] backdrop-blur">
-          <Link href="/" className="text-white transition-colors hover:text-[#ff6b00]">
-            {BRAND_WORDMARK}
-          </Link>
-          <span className="text-white/25">·</span>
-          <span className="text-white/60">DASHBOARD</span>
-          <span className="text-white/25">·</span>
-          <span className="text-white/60">LOS ANGELES</span>
-        </div>
+    <main className="fixed inset-0 flex flex-col overflow-hidden bg-page text-fg">
+      <header className="flex h-12 shrink-0 items-center gap-4 border-b border-rule bg-page pl-5 pr-3">
+        <Link href="/" className="text-[17px] font-medium text-fg">
+          {BRAND.name}
+        </Link>
+        <nav aria-label="Breadcrumb" className="caps flex items-center gap-3 text-[11px]">
+          <span className="text-soft">Dashboard</span>
+          <span className="text-faint">/</span>
+          <span className="text-dim">Los Angeles</span>
+        </nav>
         {/* The live dispatch console, served by the API through this app's /live proxy. */}
         <a
           href="/live/view"
-          className="pointer-events-auto shrink-0 whitespace-nowrap rounded-md border border-[#ff6b00]/40 bg-black/75 px-4 py-2 font-mono text-xs tracking-[0.3em] text-[#ff6b00] backdrop-blur transition-colors hover:bg-[#ff6b00]/10"
+          className="ml-auto flex h-[30px] shrink-0 items-center whitespace-nowrap bg-white px-4 text-[13px] text-ink transition-colors hover:bg-rule-light"
         >
-          LIVE CONSOLE →
+          Live console ↗
         </a>
-      </div>
+      </header>
 
-      {/* Popover */}
-      {popover && (
-        <div
-          className="pointer-events-none absolute z-20"
-          style={{
-            left: popover.screen.x,
-            top: popover.screen.y,
-            transform: "translate(-50%, calc(-100% - 22px))",
-          }}
-        >
-          <div className="pointer-events-auto relative w-72 rounded-md border border-white/[0.1] bg-black/95 p-4 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.95)] backdrop-blur">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="font-mono text-[10px] tracking-[0.3em] text-white/40">
-                BUILDING · {popover.lngLat[1].toFixed(4)}, {popover.lngLat[0].toFixed(4)}
-              </span>
-              <button
-                onClick={() => {
-                  popoverLngLatRef.current = null;
-                  setPopover(null);
-                }}
-                aria-label="Close"
-                className="font-mono text-base leading-none text-white/40 transition-colors hover:text-white"
-              >
-                ×
-              </button>
-            </div>
-            <div className="mb-4 text-sm font-medium leading-snug text-white">
-              {popover.building.address}
-            </div>
-            <Link
-              href={`/building/${popover.building.id}`}
-              className="group/cta inline-flex w-full items-center justify-between rounded-sm bg-[#ff6b00] px-3 py-2 font-mono text-[11px] font-medium tracking-[0.2em] text-black transition-colors hover:bg-[#ff7f1f]"
-            >
-              OPEN PRE-PLAN
-              <span aria-hidden className="transition-transform group-hover/cta:translate-x-0.5">
-                →
-              </span>
-            </Link>
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <div className="relative min-h-[50vh] min-w-0 flex-1">
+          {/* Inline: mapbox-gl.css sets .mapboxgl-map to position: relative, beating the utility. */}
+          <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
 
-            <div className="absolute left-1/2 top-full -translate-x-1/2">
-              <div className="h-0 w-0 border-x-[8px] border-t-[8px] border-x-transparent border-t-black/95" />
-            </div>
+          <div className="pointer-events-none absolute left-8 top-9 z-10">
+            <h1 className="text-[28px] leading-[32px] tracking-[-0.03em] md:text-[44px] md:leading-[50px] text-fg">
+              Los Angeles
+            </h1>
+            <p className="text-[28px] leading-[32px] tracking-[-0.03em] md:text-[44px] md:leading-[50px] text-dim">
+              {scannedLine(scannedCount)}
+            </p>
           </div>
-        </div>
-      )}
 
-      {primary && <VenuePreplanCard building={primary} />}
+          <dl className="caps pointer-events-none absolute bottom-4 left-8 z-10 flex gap-8 text-[10px]">
+            <div>
+              <dt className="text-faint">Centre</dt>
+              <dd className="text-dim tabular-nums">{formatLngLat(center)}</dd>
+            </div>
+            <div>
+              <dt className="text-faint">Zoom</dt>
+              <dd className="text-dim tabular-nums">{MAP_ZOOM}</dd>
+            </div>
+            <div>
+              <dt className="text-faint">Pitch</dt>
+              <dd className="text-dim tabular-nums">
+                {MAP_PITCH}° · Bearing {String(MAP_BEARING).replace("-", "−")}°
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <aside className="flex max-h-[50vh] w-full shrink-0 flex-col overflow-y-auto border-t border-rule bg-page md:max-h-none md:w-[360px] md:border-l md:border-t-0">
+          <PanelSection label="Building" n={1}>
+            {selected && selectedName ? (
+              <div className="flex flex-col gap-4">
+                <div>
+                  <div className="text-[22px] leading-[30px] tracking-[-0.01em] text-fg">
+                    {selectedName.name}
+                  </div>
+                  {selectedName.rest && (
+                    <div className="mt-1 text-[13px] text-quiet">{selectedName.rest}</div>
+                  )}
+                </div>
+                {selected.scan_url ? (
+                  <Link
+                    href={`/building/${selected.id}`}
+                    className="flex h-[38px] items-center justify-between bg-white px-3.5 text-[14px] text-ink transition-colors hover:bg-rule-light"
+                  >
+                    View building <span aria-hidden>→</span>
+                  </Link>
+                ) : (
+                  <div className="flex h-[38px] items-center border border-control px-3.5 text-[14px] text-quiet">
+                    Pre-plan pending
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="caps text-[11px] text-dim">No buildings yet.</p>
+            )}
+          </PanelSection>
+
+          {selected && <VenuePreplanCard key={selected.id} building={selected} />}
+        </aside>
+      </div>
     </main>
   );
 }
