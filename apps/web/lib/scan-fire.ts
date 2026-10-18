@@ -1,12 +1,15 @@
 // Fire timeline from packages/engine, drawn over the scan. Live: the API runs the engine
-// (GET /engine/viewer?start=…, proxied by next.config.ts). Fallback file for the default start:
-// cd packages/engine && uv run python -m engine.demo --start 140 --frame-step 10 \
-//   --departures 0,60,120,180,240,300,420 --viewer-out ../../apps/web/public/fire/venue.json
+// (GET /engine/viewer?start=…, proxied by next.config.ts). Fallback file for the default start,
+// the same JSON with each room's geometry_source (cd apps/api):
+// uv run python -c "from pathlib import Path; from app.routes import engine as e;
+//   Path('../web/public/fire/venue.json').write_bytes(e._run('140', 'fast')['viewer'])"
 
 export type FireRoomState = "clear" | "smoke" | "untenable" | "burning" | "flashover" | "burnt_out";
 
 export type FireFrameRoom = {
   layer_height_m: number;
+  /** Smoke below the room's own ceiling (m). */
+  smoke_depth_m?: number;
   layer_temp_c: number;
   hrr_kw: number;
   state: FireRoomState;
@@ -16,11 +19,21 @@ export type FireFrame = {
   t_s: number;
   rooms: Record<string, FireFrameRoom>;
   blocked: string[];
+  /** Past the first flashover: the screening zone model's numbers are indicative only. */
+  beyond_screening?: boolean;
 };
+
+/** Where a room's outline comes from (venue.json geometry_source): only "scan" is scanned. */
+export type GeometrySource = "scan" | "plan_traced" | "plan_bbox" | string;
 
 export type FireRoom = {
   name: string;
   floor: number;
+  storey?: string | null;
+  event_name?: string | null;
+  geometry_source?: GeometrySource;
+  /** True only for rooms outlined from the LiDAR scan (added by the API's /engine/viewer). */
+  scanned?: boolean;
   footprint: { x: [number, number]; z: [number, number] } | null;
   /** Room outline [x, z] in the scan frame; preferred over `footprint` when present. */
   polygon?: [number, number][] | null;
@@ -58,6 +71,10 @@ export type FireEvent = { t_s: number; type: string; id: string; detail: string 
 
 export type FireTimeline = {
   venue: string;
+  /** The engine's own flag: false = a screening model, not a verified fire engineering study. */
+  verified?: boolean;
+  /** What was scanned and what comes from the floor plan. */
+  provenance?: string;
   start_room: string;
   growth: string;
   horizon_s: number;
@@ -75,7 +92,7 @@ export type FireTimeline = {
 // the fallback for the default start).
 const VENUE_BUILDING_ID = process.env.NEXT_PUBLIC_VENUE_BUILDING_ID;
 
-function isVenue(buildingId: string): boolean {
+export function isVenue(buildingId: string): boolean {
   return buildingId === "venue" || buildingId === VENUE_BUILDING_ID;
 }
 
@@ -122,6 +139,73 @@ export async function loadFireTimeline(
     if (live || start) return live;
   }
   return fetchJson<FireTimeline>(fireTimelineUrl(buildingId));
+}
+
+/** The responder size-up for one scenario (GET /engine/summary → sizeup). */
+export type SizeUpPlace = { t_s: number; space: string | null; name: string };
+export type SizeUpExit = { exit: string; label: string; from?: string; lost_s?: number };
+export type SizeUpOutcome = { at_risk: number; last_out_s: number | null };
+export type SizeUpDeparture = {
+  t0_s: number;
+  occupants: number;
+  plan: SizeUpOutcome;
+  self: SizeUpOutcome;
+};
+export type SizeUpStair = {
+  stair: string;
+  label: string;
+  from: string;
+  to: string;
+  outdoors: boolean;
+};
+
+export type SizeUp = {
+  verified: boolean;
+  origin: {
+    space: string;
+    name: string;
+    storey: string | null;
+    growth: string;
+    untenable_s: number | null;
+  };
+  first_smoke_beyond_origin: SizeUpPlace | null;
+  first_untenable_beyond_origin: SizeUpPlace | null;
+  first_flashover_s: number | null;
+  exits_total: number;
+  exits_lost: SizeUpExit[];
+  exits_kept: SizeUpExit[];
+  departures: SizeUpDeparture[];
+  ways_down: Record<string, SizeUpStair[]>;
+  check_on_site: { opening: string; between: [string, string]; note: string }[];
+  best_moment: {
+    t0_s: number;
+    plan_at_risk: number;
+    self_at_risk: number;
+    saved: number;
+  } | null;
+  assumptions: string[];
+  provenance: string;
+};
+
+/** The engine's size-up for this start (API default when none is picked). */
+export async function loadSizeUp(
+  buildingId: string,
+  start?: string | null,
+): Promise<SizeUp | null> {
+  if (!isVenue(buildingId)) return null;
+  const query = start ? `?start=${encodeURIComponent(start)}` : "";
+  const body = await fetchJson<{ sizeup?: SizeUp }>(`/engine/summary${query}`);
+  return body?.sizeup ?? null;
+}
+
+/** The latest size-up departure at or before t, or the first one. */
+export function sizeUpDepartureAt(sizeUp: SizeUp, tS: number): SizeUpDeparture | null {
+  let best: SizeUpDeparture | null = sizeUp.departures[0] ?? null;
+  for (const d of sizeUp.departures) {
+    if (d.t0_s <= tS) best = d;
+    else break;
+  }
+  return best;
 }
 
 export function frameAt(timeline: FireTimeline, tS: number): FireFrame {

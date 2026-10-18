@@ -8,12 +8,12 @@ import { useEffect, useRef, useState } from "react";
 import { BRAND_WORDMARK } from "@/lib/brand";
 import type { Building } from "@/lib/supabase";
 
-import { AgentActivity, type PreplanRow } from "./AgentActivity";
+import { VenuePreplanCard } from "./VenuePreplanCard";
 
 type PopoverState = {
   lngLat: [number, number];
   screen: { x: number; y: number };
-  building: Building | null; // matched building, or null = unknown structure
+  building: Building;
 } | null;
 
 const VENUE_MATCH_DEG = 0.0005; // ~55m at this latitude
@@ -22,13 +22,9 @@ const VENUE_FALLBACK_CENTER: [number, number] = [-118.44520289359974, 34.0702694
 
 export function MapDashboard({
   buildings,
-  preplans,
-  preplanCount,
   mapboxToken,
 }: {
   buildings: Building[];
-  preplans: PreplanRow[];
-  preplanCount: number;
   mapboxToken: string;
 }) {
   const primary = buildings[0] ?? null;
@@ -223,7 +219,12 @@ export function MapDashboard({
 
       const lngLat: [number, number] = [e.lngLat.lng, e.lngLat.lat];
       const matched = findClosestBuilding(buildings, lngLat, VENUE_MATCH_DEG);
-      const anchor: [number, number] = matched ? [matched.lng, matched.lat] : lngLat;
+      // Only pre-planned buildings open a card; any other building on the map has no data.
+      if (!matched) {
+        closePopover();
+        return;
+      }
+      const anchor: [number, number] = [matched.lng, matched.lat];
       const p = map.project(anchor);
 
       popoverLngLatRef.current = anchor;
@@ -317,24 +318,17 @@ export function MapDashboard({
               </button>
             </div>
             <div className="mb-4 text-sm font-medium leading-snug text-white">
-              {popover.building?.address ?? "UNKNOWN STRUCTURE"}
+              {popover.building.address}
             </div>
-            {popover.building ? (
-              <Link
-                href={`/building/${popover.building.id}`}
-                className="group/cta inline-flex w-full items-center justify-between rounded-sm bg-[#ff6b00] px-3 py-2 font-mono text-[11px] font-medium tracking-[0.2em] text-black transition-colors hover:bg-[#ff7f1f]"
-              >
-                VIEW BUILDING
-                <span aria-hidden className="transition-transform group-hover/cta:translate-x-0.5">
-                  →
-                </span>
-              </Link>
-            ) : (
-              <div className="inline-flex w-full items-center justify-between rounded-sm border border-white/[0.06] bg-white/[0.02] px-3 py-2 font-mono text-[11px] tracking-[0.2em] text-white/30">
-                PRE-PLAN PENDING
-                <span aria-hidden>—</span>
-              </div>
-            )}
+            <Link
+              href={`/building/${popover.building.id}`}
+              className="group/cta inline-flex w-full items-center justify-between rounded-sm bg-[#ff6b00] px-3 py-2 font-mono text-[11px] font-medium tracking-[0.2em] text-black transition-colors hover:bg-[#ff7f1f]"
+            >
+              OPEN PRE-PLAN
+              <span aria-hidden className="transition-transform group-hover/cta:translate-x-0.5">
+                →
+              </span>
+            </Link>
 
             <div className="absolute left-1/2 top-full -translate-x-1/2">
               <div className="h-0 w-0 border-x-[8px] border-t-[8px] border-x-transparent border-t-black/95" />
@@ -343,7 +337,7 @@ export function MapDashboard({
         </div>
       )}
 
-      <AgentActivity preplans={preplans} preplanCount={preplanCount} />
+      {primary && <VenuePreplanCard building={primary} />}
     </main>
   );
 }

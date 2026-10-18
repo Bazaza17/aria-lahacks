@@ -31,13 +31,58 @@ VIEWER_DEPARTURES = (0.0, 60.0, 120.0, 180.0, 240.0, 300.0, 420.0)
 VIEWER_FRAME_STEP_S = 10.0
 CACHE_RUNS = 24  # ~0.7 MB of viewer JSON each
 
+# Where the outlines come from: only four 1F rooms are scanned; the rest is the floor plan.
+PROVENANCE_NOTE = (
+    "1F: four rooms scanned with phone LiDAR and stitched (about +/-0.3 m at the joins); the "
+    "rest of the 1F and the upper floors come from the floor plan."
+)
+
+
+# --- venue.json lookups. ---
+@lru_cache(maxsize=1)
+def _venue() -> dict:
+    return json.loads(Path(demo.VENUE_JSON).read_text(encoding="utf-8"))
+
+
+@lru_cache(maxsize=1)
+def _spaces() -> dict[str, dict]:
+    return {s["id"]: s for s in _venue()["spaces"]}
+
+
+@lru_cache(maxsize=1)
+def _openings() -> dict[str, dict]:
+    return {o["id"]: o for o in _venue()["openings"]}
+
+
+def _space_name(sid: str | None, plan: bool = False) -> str:
+    """The event name (Collins Conference Room) or, with plan or without one, the plan name's
+    short form."""
+    if not sid or sid == "SAFE":
+        return "outside"
+    s = _spaces().get(sid)
+    if s is None:
+        return sid
+    if s.get("event_name") and not plan:
+        return s["event_name"]
+    short = (s.get("name") or sid).split(" (")[0].split(", ")[0]
+    return f"Room {short}" if short[:1].isdigit() and " " not in short else short
+
+
+def _opening_label(oid: str) -> str:
+    o = _openings().get(oid) or {}
+    aliases = o.get("aliases") or []
+    if aliases:
+        # An exterior stair reads better by what it is than by where it goes.
+        alias = next((a for a in aliases if "exterior" in a), aliases[0])
+        return alias[:1].upper() + alias[1:]
+    return f"{_space_name(o.get('a'))} to {_space_name(o.get('b'))}"
+
 
 @lru_cache(maxsize=1)
 def starts() -> list[dict]:
     """Indoor spaces a fire can start in, from venue.json."""
-    raw = json.loads(Path(demo.VENUE_JSON).read_text(encoding="utf-8"))
     out = []
-    for s in raw["spaces"]:
+    for s in _venue()["spaces"]:
         if s.get("is_outdoor") or s.get("kind") in NON_WALKING_KINDS:
             continue
         out.append(
@@ -52,6 +97,24 @@ def starts() -> list[dict]:
     return out
 
 
+def _viewer_with_provenance(viewer: dict) -> dict:
+    """The engine's viewer block plus, per room, where its outline comes from (venue.json's
+    geometry_source) and its storey. A copy: the engine result itself is left unchanged."""
+    spaces = _spaces()
+    rooms = {}
+    for sid, room in viewer["rooms"].items():
+        src = spaces.get(sid, {})
+        source = src.get("geometry_source") or "plan"
+        rooms[sid] = {
+            **room,
+            "storey": src.get("storey"),
+            "event_name": src.get("event_name"),
+            "geometry_source": source,
+            "scanned": source == "scan",
+        }
+    return {**viewer, "rooms": rooms, "provenance": PROVENANCE_NOTE}
+
+
 @lru_cache(maxsize=CACHE_RUNS)
 def _run(start: str, growth: str) -> dict:
     result = demo.run_demo(
@@ -60,9 +123,11 @@ def _run(start: str, growth: str) -> dict:
         departures=VIEWER_DEPARTURES,
         frame_step_s=VIEWER_FRAME_STEP_S,
     )
+    viewer = _viewer_with_provenance(result["viewer"])
     return {
-        "viewer": json.dumps(result["viewer"], ensure_ascii=False).encode("utf-8"),
+        "viewer": json.dumps(viewer, ensure_ascii=False).encode("utf-8"),
         "scenario": result,
+        "sizeup": _sizeup(result),
     }
 
 
@@ -96,11 +161,152 @@ async def viewer(start: str = Query(demo.DEFAULT_START), growth: str = Query("fa
 async def scenario_summary(
     start: str = Query(demo.DEFAULT_START), growth: str = Query("fast")
 ) -> dict:
-    """Scenario, readable summary and exits lost: what the agents and the report quote."""
-    result = await run(start, growth)
+    """Scenario, readable summary, exits lost and the responder size-up (apps/web's panel)."""
+    _check(start, growth)
+    cached = await asyncio.to_thread(_run, start, growth)
+    result = cached["scenario"]
     return {
         "scenario": result["scenario"],
         "summary": result["summary"],
         "exits": result["fire"]["exits"],
         "origin": result["fire"]["origin"],
+        "sizeup": cached["sizeup"],
+    }
+
+
+# --- The responder size-up. ---
+SIZEUP_ASSUMPTIONS = [
+    "Worst case: no sprinklers, no smoke control, no fire service action.",
+    "Screening zone model, one smoke layer per room; after the first flashover its numbers "
+    "are indicative only.",
+    "Untenable: smoke layer below 2 m or hotter than 200 C; the room of origin once the fire "
+    "radiates 2.5 kW/m2 at 3 m.",
+    "Occupants: the event-night load per room (2nd-floor workshops indoors), moving as groups "
+    "at SFPE walking speeds and door and stair flows, starting the moment they leave.",
+    "Elevators are not used for evacuation.",
+    "Connections marked uncertain in the venue data are modelled open: check them on site.",
+]
+
+
+def _mark(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    sid = row.get("space")
+    return {"t_s": row["t_s"], "space": sid, "name": _space_name(sid)}
+
+
+def _all_out(dep: dict, mode: str) -> dict:
+    """People at risk and when the last person who gets out is out, for one departure time."""
+    at_risk = 0
+    last = None
+    for sp in dep["spaces"].values():
+        if not sp.get("occupants"):
+            continue
+        route = sp.get(mode) or {}
+        at_risk += route.get("at_risk") or 0
+        flow = route.get("flow") or {}
+        if flow.get("cleared") and flow.get("last_out_s") is not None:
+            last = max(last or 0.0, float(flow["last_out_s"]))
+    return {"at_risk": at_risk, "last_out_s": last}
+
+
+def _departures(result: dict) -> list[dict]:
+    out = []
+    for dep in result["routes"]["departures"]:
+        occupants = sum(sp.get("occupants") or 0 for sp in dep["spaces"].values())
+        out.append(
+            {
+                "t0_s": dep["t0_s"],
+                "occupants": occupants,
+                "plan": _all_out(dep, "predictive"),
+                "self": _all_out(dep, "reactive"),
+            }
+        )
+    return out
+
+
+def _ways_down(summary: dict) -> dict[str, list[dict]]:
+    return {
+        storey: [
+            {
+                "stair": w["stair"],
+                "label": _opening_label(w["stair"]),
+                "from": _space_name(w["from"]),
+                "to": _space_name(w["to"]),
+                "outdoors": w["lands_in"] == "outdoors",
+            }
+            for w in stairs
+        ]
+        for storey, stairs in sorted(summary["ways_down"].items())
+    }
+
+
+def _check_on_site(summary: dict) -> list[dict]:
+    out = []
+    for oid in summary["uncertain_open_connections"]:
+        o = _openings().get(oid) or {}
+        out.append(
+            {
+                "opening": oid,
+                "between": [_space_name(o.get("a"), True), _space_name(o.get("b"), True)],
+                "note": o.get("notes") or "",
+            }
+        )
+    return out
+
+
+def _exits(result: dict) -> dict:
+    exits = result["fire"]["exits"]
+    lost = sorted((e for e in exits if e["lost_s"] is not None), key=lambda e: e["lost_s"])
+    return {
+        "exits_total": len(exits),
+        "exits_lost": [
+            {
+                "exit": e["exit"],
+                "label": _opening_label(e["exit"]),
+                "from": _space_name(e.get("from")),
+                "lost_s": e["lost_s"],
+            }
+            for e in lost
+        ],
+        "exits_kept": [
+            {"exit": e["exit"], "label": _opening_label(e["exit"])}
+            for e in exits
+            if e["lost_s"] is None
+        ],
+    }
+
+
+def _sizeup(result: dict) -> dict:
+    s, sc = result["summary"], result["scenario"]
+    start = sc["start_space"]
+    best = s.get("best_moment")
+    return {
+        "verified": bool(result["viewer"].get("verified")),
+        "origin": {
+            "space": start,
+            "name": _space_name(start),
+            "storey": _spaces().get(start, {}).get("storey"),
+            "growth": sc["growth"],
+            "untenable_s": (s.get("origin") or {}).get("limit_s"),
+        },
+        "first_smoke_beyond_origin": _mark(s.get("first_smoke_beyond_origin")),
+        "first_untenable_beyond_origin": _mark(s.get("first_untenable_beyond_origin")),
+        "first_flashover_s": result["fire"]["validity"].get("first_flashover_s"),
+        **_exits(result),
+        "departures": _departures(result),
+        "ways_down": _ways_down(s),
+        "check_on_site": _check_on_site(s),
+        "best_moment": (
+            {
+                "t0_s": best["t0_s"],
+                "plan_at_risk": best["at_risk"]["predictive"],
+                "self_at_risk": best["at_risk"]["reactive"],
+                "saved": best["saved"],
+            }
+            if best
+            else None
+        ),
+        "assumptions": SIZEUP_ASSUMPTIONS,
+        "provenance": PROVENANCE_NOTE,
     }

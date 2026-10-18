@@ -18,15 +18,6 @@ export function getServerSupabase(): SupabaseClient {
   });
 }
 
-let _browser: SupabaseClient | null = null;
-export function getBrowserSupabase(): SupabaseClient {
-  if (!_browser) {
-    const { url, anonKey } = resolveEnv();
-    _browser = createClient(url, anonKey);
-  }
-  return _browser;
-}
-
 export type Building = {
   id: string;
   address: string;

@@ -1,6 +1,6 @@
 # Web app (`apps/web`)
 
-Frontend for the [project](../../README.md) — the dashboard, building page, agent log, 3D scan viewer with storm-surge slider, and pre-incident report panel.
+Frontend for the [project](../../README.md): the landing page, the dashboard map, and the venue's fire pre-plan (3D scan with the engine's fire, smoke and routes, a fire clock, and the responder size-up). The live dispatch console is served by the API at `/live/view` through this app's proxy.
 
 ## Stack
 
@@ -10,10 +10,9 @@ Frontend for the [project](../../README.md) — the dashboard, building page, ag
 - **framer-motion** for the cinematic landing fade-in
 - **Mapbox GL JS** for the 3D dashboard
 - **Three.js** + `USDZLoader` + `OrbitControls` for in-browser USDZ rendering
-- **lucide-react** for icons
-- **@supabase/supabase-js** for buildings / preplans / tool_calls
+- **@supabase/supabase-js** for the buildings table
 
-The frontend never calls Anthropic directly. All agent traffic flows through the FastAPI backend so the live tool-use log can stream as SSE.
+The fire engine runs in the API (`GET /engine/starts`, `/engine/viewer`, `/engine/summary`), proxied at `/engine/*` by `next.config.ts`.
 
 ## Folder structure
 
@@ -21,35 +20,27 @@ The frontend never calls Anthropic directly. All agent traffic flows through the
 apps/web/
 ├── app/
 │   ├── page.tsx                      # / — cinematic landing
-│   ├── dashboard/                    # /dashboard — 3D Mapbox + activity panel
-│   ├── building/[id]/                # /building/:id — three-column workbench
-│   ├── globals.css                   # design tokens + slider styles + fade keyframes
+│   ├── dashboard/                    # /dashboard — 3D Mapbox + venue pre-plan card
+│   ├── building/[id]/                # /building/:id — fire pre-plan workbench
+│   ├── fire-preview/                 # local preview over the stitched venue GLB
+│   ├── globals.css                   # design tokens + slider styles + place pins
 │   └── layout.tsx
 ├── components/
-│   ├── agent/
-│   │   ├── useAgentStream.ts         # POST /agent/run, parse SSE off the body stream
-│   │   ├── AgentRunProvider.tsx      # Context: events, report, running, elapsedMs, run()
-│   │   ├── AgentLog.tsx              # Cinematic terminal renderer
-│   │   └── AgentLogPane.tsx          # Thin pane wrapper
 │   ├── scan/
-│   │   └── BuildingScan.tsx          # Three.js USDZ viewer + metadata overlay
-│   ├── building/
-│   │   ├── BuildingCenterPane.tsx    # 3D scan + scenario strip
-│   │   ├── ScenarioProvider.tsx      # Context: storm-surge level shared with the scan
-│   │   ├── ScenarioStrip.tsx         # Surge slider, risk badge, scenario label
-│   │   └── scenario.ts               # Surge stops, risk + label helpers
-│   └── report/
-│       ├── PreplanReport.tsx         # Right-column panel + actions + fullscreen toggle
-│       ├── FullscreenReport.tsx      # "Give this to the chief" overlay
-│       └── actions.ts                # Generate immediate-action cards from agent output
+│   │   ├── BuildingScan.tsx          # Three.js scan viewer + fire layer + metadata overlay
+│   │   ├── scanSceneLayers.ts        # fire/smoke rooms (dashed = from floor plan), routes, place pins
+│   │   ├── FireStartPicker.tsx       # "Fire starts in"
+│   │   └── PlaceSearch.tsx           # find a place on the scan
+│   └── building/
+│       ├── BuildingCenterPane.tsx    # scan + size-up panel + fire clock strip
+│       ├── ScenarioProvider.tsx      # Context: fire clock, play state, fire start
+│       ├── ScenarioStrip.tsx         # fire timeline slider
+│       └── SizeUpPanel.tsx           # responder size-up from /engine/summary
 ├── lib/
-│   ├── types.ts                      # Shared types — mirrors the Pydantic schema
-│   ├── supabase.ts                   # Server + browser Supabase client helpers
-│   ├── brand.ts                      # Product name / tagline (rename here)
-│   ├── scan-evac-paths.ts            # Evacuation graph + surge-linked exit blocking
-│   ├── scan-flood.ts                 # Surge height → water plane
-│   ├── time.ts                       # formatRelative()
-│   └── design.ts                     # Color tokens
+│   ├── scan-fire.ts                  # FireTimeline + SizeUp types and loaders
+│   ├── scan-places.ts                # places.json search
+│   ├── supabase.ts                   # Server Supabase client
+│   └── brand.ts                      # Product name / tagline (rename here)
 ├── public/                           # static files only — scans live in Supabase Storage
 ├── tests/e2e/                        # Playwright specs
 ├── types/model-viewer.d.ts           # JSX declaration (kept for future use)
@@ -58,11 +49,9 @@ apps/web/
 
 ## Key components
 
-- **`MapDashboard`** — Mapbox GL on the `/dashboard` route. Dark v11 style at pitch 60°, custom `building-extrusion` fill-extrusion layer (the style's built-in `building` layer is `type: fill`, we hide it and add our own), pulsing-circle GeoJSON source for the primary venue, plus smaller dots for other demo buildings. Click handler proximity-matches the click against `buildings`, opens a popover with `VIEW BUILDING` routing.
-- **`BuildingCenterPane`** — the 3D scan with the storm-surge scenario strip underneath; surge level is shared via `ScenarioProvider` so the scan's flood plane and evacuation exits react to it.
-- **`BuildingScan`** — Three.js scene with `USDZLoader`, `OrbitControls`, auto-rotate until first interaction. Camera distance derived from the model's bounding box for a tight cinematic 3/4 framing. Real vertex count is computed from the loaded geometry and shown in the metadata overlay.
-- **`AgentLog`** — reads SSE events from `useAgentStream` via `AgentRunProvider` context. Reasoning events run through `stripReportBlock()` to drop the final ` ```json ``` ` dump (the report panel renders that as structured cards). Footer collapses to `✓ AGENT COMPLETE · N TOOLS · N ITERATIONS · Xs` on completion.
-- **`PreplanReport`** — `HEADLINE RISK` hero text → `IMMEDIATE ACTIONS` (generated from agent output, sortable by severity, click-to-dispatch with timestamp) → `BUILDING PROFILE` → three hazard cards. `Maximize2` icon opens a fullscreen modal with dramatic typography for the "give this to the chief" view.
+- **`MapDashboard`** — Mapbox GL on `/dashboard`: dark style at pitch 60°, a custom building extrusion layer, a pulsing marker for the venue. Clicking the venue opens a popover that links to its pre-plan; `VenuePreplanCard` shows the engine's headline numbers for the default scenario.
+- **`BuildingScan`** — Three.js scene (GLB or USDZ), auto-rotate until first interaction. Draws the engine's rooms over the scan: scanned rooms with a solid outline, rooms from the floor plan (the rest of the 1F and all upper floors) dashed and fainter. Smoke fills each room to its layer depth; exits turn red when lost. Shows "INDICATIVE AFTER FLASHOVER" once the clock passes the first flashover (frames carry `beyond_screening`).
+- **`SizeUpPanel`** — follows the fire start and the fire clock: origin and growth, key fire moments, exits lost and when, people at risk and time until everyone is out with Aria's plan vs self-chosen routes, where the plan matters most, ways down per floor, connections to check on site, and the assumptions (worst case: no sprinklers, smoke control or fire service).
 
 ## Environment variables
 

@@ -460,16 +460,16 @@ export default function LandingPage() {
               never been inside, with no plan for how the fire will move or which exits will hold.
             </p>
             <p className="leading-relaxed text-white/50">
-              Crews get <span className="text-white/80">60 seconds</span> to size up an unfamiliar
-              structure while lives are on the line. That’s the problem {BRAND.name} solves — before
-              the tone drops.
+              The size-up happens on the curb, in the first minutes, from what crews can see from
+              outside. {BRAND.name} does the work before the call: how this building burns, which
+              exits it loses and when, and who is still inside.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <StatCard value="16,000+" label="structures destroyed in the January 2025 LA fires" />
             <StatCard value="470K+" label="incidents LAFD answered in 2021" />
-            <StatCard value="60s" label="average on-scene size-up window" />
-            <StatCard value="30s" label={`${BRAND.name}'s size-up, ready before dispatch`} />
+            <StatCard value="63" label="spaces in the venue model, from the scan and floor plan" />
+            <StatCard value="14" label="exterior exits, each checked against the fire clock" />
           </div>
         </div>
       </section>
@@ -484,25 +484,25 @@ export default function LandingPage() {
             <Step
               n="01"
               title="Scan the building"
-              body="Capture a LiDAR scan with a phone. Polycam exports a 3D mesh in minutes."
+              body="Capture rooms with a phone LiDAR scan and stitch them into one model. The floor plan fills in the rest of the building, floor by floor."
             />
             <div className="h-px bg-white/[0.06]" />
             <Step
               n="02"
-              title="Agent synthesizes the intel"
-              body="The scan and floor plan become a building model. Fire and smoke spread through it room by room while agents route every room to every exit and write a structured report."
+              title="The engine runs the fire"
+              body="Pick any room as the fire's start. Fire and smoke spread through the building model room by room, and the engine times when each room becomes untenable and each exit is lost."
             />
             <div className="h-px bg-white/[0.06]" />
             <Step
               n="03"
-              title="Chief gets the size-up"
-              body="Headline risk, immediate actions, and the 3D scan showing how the fire moves, which exits stay open and how long the building takes to clear."
+              title="Routes and who is at risk"
+              body="Every occupied room gets a route out that books door and stair capacity, compared with the routes people would pick themselves: who is at risk, how long everyone takes to get out, which ways down each floor has."
             />
             <div className="h-px bg-white/[0.06]" />
             <Step
               n="04"
-              title="Cache it. Always ready."
-              body="Reports are stored and replayed instantly. No live API call at dispatch, so it works in the field."
+              title="Live response"
+              body="During an incident, CREAO agents run the response: people inside get texts and calls with directions and answers, and a dispatcher console shows it all live."
             />
           </div>
           <div>
@@ -511,8 +511,8 @@ export default function LandingPage() {
               Scan once. <span className="text-white/40">Pre-plan every call.</span>
             </h2>
             <p className="leading-relaxed text-white/50">
-              The same pattern used for AI-driven drone inspection — agent over visual + geospatial
-              data — applied to building risk for the people who run toward the fire.
+              One building model serves both sides: the pre-plan responders read before the call,
+              and the live response that guides people out while it happens.
             </p>
             <Link
               href="/dashboard"
@@ -538,9 +538,8 @@ export default function LandingPage() {
             Los Angeles is the wedge. The architecture scales to any city, any building type, any
             risk profile.
           </p>
-          <div className="mb-14 grid gap-6 md:grid-cols-3">
+          <div className="mb-14 grid gap-6 md:grid-cols-2">
             <StatCard value="29,000+" label="fire departments in the United States" />
-            <StatCard value="130M+" label="buildings in the US addressable by this system" />
             <StatCard value="3.3M" label="buildings mapped in Los Angeles County alone" />
           </div>
           <div className="grid gap-8 border-t border-white/[0.06] pt-12 md:grid-cols-3">
@@ -549,8 +548,8 @@ export default function LandingPage() {
                 FIRE &amp; RESCUE
               </div>
               <p className="text-sm leading-relaxed text-white/50">
-                Battalion chiefs get a structured size-up before the truck leaves the station.
-                Immediate actions are pre-generated and dispatchable from the app.
+                Battalion chiefs get a size-up before the truck leaves the station: where the fire
+                goes, which exits are lost and when, ways down per floor, and rooms to check.
               </p>
             </div>
             <div>
@@ -567,8 +566,8 @@ export default function LandingPage() {
                 BEYOND FIRE
               </div>
               <p className="text-sm leading-relaxed text-white/50">
-                Insurance underwriting, CRE due diligence, urban search &amp; rescue. {BRAND.name}{" "}
-                is a structured-intel agent platform — fire response is the wedge.
+                Insurance underwriting, CRE due diligence, urban search &amp; rescue. Fire response
+                is the wedge.
               </p>
             </div>
           </div>
