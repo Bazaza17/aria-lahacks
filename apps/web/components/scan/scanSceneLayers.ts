@@ -17,8 +17,8 @@ const DEFAULT_CEILING_M = 3;
 // Scanned rooms get a solid outline. Rooms from the floor plan (the rest of the 1F and every upper
 // floor) get a fainter dashed one, so nothing plan-derived passes for scanned.
 const OUTLINE_OPACITY = 0.3;
-const PLAN_OUTLINE_OPACITY = 0.2;
-const UPPER_OUTLINE_OPACITY = 0.12;
+const PLAN_OUTLINE_OPACITY = 0.14;
+const UPPER_OUTLINE_OPACITY = 0.07;
 const SELECTED_OUTLINE_OPACITY = 0.95;
 const PLAN_DASH_M = 0.6;
 const PLAN_GAP_M = 0.4;
@@ -27,9 +27,11 @@ const PLAN_GAP_M = 0.4;
 // Scan crop: a box around the scanned rooms, so the LiDAR's ragged edges (glimpses through
 // doors and windows, floor noise) don't frame the building.
 
-const CROP_MARGIN_M = 1.2;
-const CROP_BELOW_FLOOR_M = 0.35;
-const CROP_ABOVE_FLOOR_M = 9;
+// Tight margin, and a section cut ~2.6 m above the ground floor: ceilings, light fittings and
+// the floating noise above them go, so you look straight into the rooms like a cut-away plan.
+const CROP_MARGIN_M = 0.5;
+const CROP_BELOW_FLOOR_M = 0.2;
+const CROP_ABOVE_FLOOR_M = 2.6;
 
 /** Scene-space box around the scanned ground-floor rooms (venue frame bounds + a margin). */
 export function scanCropBox(
@@ -542,6 +544,8 @@ export type ExitLayerObjects = {
   group: THREE.Group;
   update: (tS: number) => void;
   setSelected: (key: string | null) => void;
+  /** Show or hide every exit's name label at once (markers stay). */
+  setLabelsVisible: (visible: boolean) => void;
   pick: (raycaster: THREE.Raycaster) => string | null;
   dispose: () => void;
 };
@@ -670,6 +674,9 @@ export function buildExitLayer(
       if (key === selected) return;
       selected = key;
       for (const m of markers) paint(m);
+    },
+    setLabelsVisible: (visible) => {
+      for (const m of markers) m.label.style.display = visible ? "" : "none";
     },
     pick: (raycaster) => {
       const hit = raycaster.intersectObjects(hits, false)[0];

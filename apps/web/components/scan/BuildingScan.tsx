@@ -143,6 +143,8 @@ export function BuildingScan({
   const [placeIndex, setPlaceIndex] = useState<PlaceIndex | null>(null);
   const [placeFound, setPlaceFound] = useState<PlaceFound | null>(null);
   const [selection, setSelection] = useState<ScanSelection | null>(null);
+  // Exit name labels: off by default to keep the scan calm; one button shows them all.
+  const [showExitNames, setShowExitNames] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [interacted, setInteracted] = useState(false);
@@ -474,8 +476,9 @@ export function BuildingScan({
     fireLayerRef.current?.setSelected(liveSelection?.kind === "room" ? liveSelection.id : null);
     exitLayerRef.current?.update(fireTime);
     exitLayerRef.current?.setSelected(liveSelection?.kind === "exit" ? liveSelection.key : null);
+    exitLayerRef.current?.setLabelsVisible(showExitNames);
     routeLayerRef.current?.show(departureAt(fireTimeline, fireTime), routeFilter);
-  }, [fireTimeline, fireTime, loaded, liveSelection, routeFilter]);
+  }, [fireTimeline, fireTime, loaded, liveSelection, routeFilter, showExitNames]);
 
   const headline = (
     <h1 className="text-[36px] leading-[42px] tracking-[-0.03em]">
@@ -538,6 +541,16 @@ export function BuildingScan({
         {headline}
         {ready && placeIndex && (
           <PlaceSearch found={placeFound} onSearch={findPlace} onClear={handlePlaceClear} />
+        )}
+        {ready && fireTimeline && (
+          <button
+            type="button"
+            onClick={() => setShowExitNames((v) => !v)}
+            aria-pressed={showExitNames}
+            className="caps pointer-events-auto -mt-3 self-start border border-control px-2.5 py-1 text-[11px] text-soft transition-colors hover:border-white hover:text-fg"
+          >
+            {showExitNames ? "Hide exit names" : "Show exit names"}
+          </button>
         )}
         {ready && fireTimeline && liveSelection && (
           <ScanSelectionCard
