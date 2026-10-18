@@ -1,9 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AgentLogPane } from "@/components/agent/AgentLogPane";
 import { AgentRunProvider } from "@/components/agent/AgentRunProvider";
-import { PreplanReportPanel } from "@/components/report/PreplanReport";
 import { BuildingCenterPane } from "@/components/building/BuildingCenterPane";
 import { getServerSupabase, type Building } from "@/lib/supabase";
 
@@ -42,11 +40,13 @@ export default async function BuildingPage({ params }: { params: Promise<{ id: s
         </div>
       </header>
 
+      {/* The flood-era agent log and pre-plan report are off until the new agent layer
+          replaces them (AgentLogPane, PreplanReportPanel); the scan pane takes the full width. */}
       <AgentRunProvider address={building.address} buildingId={building.id}>
-        <section className="grid min-h-0 flex-1 grid-cols-1 gap-px bg-white/[0.06] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] lg:grid-rows-[1fr]">
-          <AgentLogPane />
-          <BuildingCenterPane buildingId={building.id} scanUrl={building.scan_url} />
-          <PreplanReportPanel />
+        <section className="flex min-h-0 flex-1 bg-white/[0.06]">
+          <div className="min-h-0 flex-1">
+            <BuildingCenterPane buildingId={building.id} scanUrl={building.scan_url} />
+          </div>
         </section>
       </AgentRunProvider>
     </main>
