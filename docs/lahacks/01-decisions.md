@@ -14,7 +14,8 @@ Only what Lincoln said explicitly. Anything not listed is open.
 - **Building input:** a Polycam scan of the building (the most important piece), its floor plan, and its address and other details.
 - **Capture order:** Polycam scan → export → floor plan. Nothing is captured yet (Sat afternoon).
 - **Floor plan source:** online; if none turns up, Lincoln draws it. Found Sat evening: a photo of the building's fire alarm annunciator (room numbers, stairs and alarm devices for floors 1–3) and the LA Hacks event map (room names). Both are in `docs/lahacks/img/`.
-- **Scans so far:** three Polycam room scans (Sat evening), not uploaded yet; Lincoln is scanning more rooms first. Room 1 findings are in `10-scan-room1.md`.
+- **Scans so far:** four Polycam room scans (Sat evening): Galleria far end, lobby 110 + entrance, Founders' Room + Patio, Collins Room. Not uploaded yet; Lincoln is scanning more rooms first. Findings are in `10-scan-room1.md` and `11-venue-plan-and-scans.md`.
+- **No tape measurements.** Door and opening widths come from the scans where they can be measured, otherwise realistic standard values (single door 0.9 m, double door 1.8 m and so on), marked as placeholders.
 - **World model source:** the scan plus the floor plan.
 - **Exit analysis:** routes first, then a crowd sim on top.
 - **Architecture:** no new API. The engine is a plain Python library in `packages/engine` (no HTTP inside it). The existing FastAPI app in `apps/api` stays the one backend the web app calls; it imports the engine and gets new routes only when the viewer needs them. The API's Dockerfile has to be able to see `packages/engine` once it imports it.
