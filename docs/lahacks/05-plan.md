@@ -68,7 +68,7 @@ A sketch to argue with, not a schedule. Hacking runs 24 hours, Sat 12:00 PM to S
 
 | Track | Set up at the start | Why at the start |
 |---|---|---|
-| Fetch.ai (fading) | Agentverse and ASI:One accounts; register on the LA Hacks ASI:One Submission Agent; run `apps/agents/hello_agent.py` end to end | Every agent has to be registered and reachable, and the shared chat URL and profile URLs are deliverables |
+| Fetch.ai (fading) | Agentverse and ASI:One accounts; register on the LA Hacks ASI:One Submission Agent; run `apps/agents/hello_agent.py` end to end (deleted Sun Oct 18 with `apps/agents`; in git history) | Every agent has to be registered and reachable, and the shared chat URL and profile URLs are deliverables |
 | Sentry (entered) | Two Sentry projects; the SDK in the API, agents, engine and web app (plan below) | It's judged on how observability shaped the build, so the moments have to happen during the build |
 | Devin | Claim the free credits; connect Devin to the GitHub repo after the push | Devin works through the repo |
 | Photon | Sign up for the Photon 2.0 beta and add a channel (iMessage or an SMS number) | — |

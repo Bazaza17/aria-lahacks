@@ -1,5 +1,7 @@
 # Aria today
 
+> **Historical (Fri Oct 17):** this describes the Miami code as ported. Since then the flood agent, `/agent/*`, the replay cache script and `apps/agents` are gone; the API now serves the engine (`/engine/*`) and the live layer (`/live/*`). The current picture is the root `README.md`.
+
 The code in this repo was ported from the original Aria codebase (`C:\Users\lincb\Documents\GitHub\Aria-miami`, `main` at commit `1f05572`, Oct 6, 2026). What changes this weekend is in `07-changes.md`.
 
 ## What it is

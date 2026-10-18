@@ -1,5 +1,7 @@
 # What changes from the Miami version
 
+> **Sun Oct 18:** the flood agent (`apps/api/app/agent`, `app/tools`, `routes/agent.py`), `scripts/prewarm_cache.py` and `0003_the_dock.sql` are deleted; the venue row is recreated by `infra/supabase/migrations/0005_venue.sql`. Rows below that point at them are history.
+
 The code came from Aria's Miami build: storm surge and flood, one hardcoded building (The Dock), a map centered on Miami, and Aria's own Supabase project. This weekend it moves to the venue and to fire. Below is where each Miami-specific piece lives.
 
 ## 1. New Supabase project

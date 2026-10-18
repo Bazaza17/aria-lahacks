@@ -18,7 +18,8 @@ COPY packages/engine /repo/packages/engine
 COPY apps/api/ .
 RUN uv sync --frozen --no-dev
 
-# Railway injects $PORT; default 8000 for local `docker run`.
+# Railway injects $PORT; default 8000 for local `docker run`. --proxy-headers trusts
+# X-Forwarded-For from the platform proxy so rate limits key on the real client IP.
 ENV PORT=8000
 EXPOSE 8000
-CMD ["sh", "-c", "uv run uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uv run uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

@@ -34,7 +34,7 @@ Options only. Decided items are marked "decided"; everything else is open (see `
 - The orchestrator talks to ASI:One through the Agent Chat Protocol, parses the request, calls the specialists, handles their failures and replies.
 - Open: message formats between agents; whether the report uses ASI Interactive Cards; how results reach the web viewer (API, Supabase or files).
 - Fetch bonus items to weigh: multi-agent collaboration, Payment Protocol, Interactive Cards, error recovery, real-time data, an agent that keeps running after the event.
-- `apps/agents/hello_agent.py` is a working Chat Protocol pattern to copy.
+- `apps/agents/hello_agent.py` was a working Chat Protocol pattern to copy. (Deleted Sun Oct 18 with the rest of `apps/agents`; it is in git history.)
 
 ## Models (open)
 

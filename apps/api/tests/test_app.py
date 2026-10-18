@@ -1,14 +1,20 @@
 """Smoke tests for the HTTP surface. No network or API keys needed."""
 
-import json
+import os
 
+import dotenv
 import pytest
 from fastapi.testclient import TestClient
 
-from app.agent import streaming
-from app.main import app
-from app.tools.executors import execute_tool
+# app.main calls load_dotenv(override=True) on import. Make that a no-op and drop any
+# SENTRY_DSN so the tests never read the real apps/api/.env or send events to Sentry.
+dotenv.load_dotenv = lambda *args, **kwargs: False
+os.environ.pop("SENTRY_DSN", None)
 
+from app.main import app  # noqa: E402
+
+# Not entered as a context manager on purpose: the lifespan (the CREAO runtime and its
+# database) never starts, so these tests open no database connection.
 client = TestClient(app)
 
 
@@ -36,22 +42,3 @@ def test_cors_origins(origin: str, allowed: bool) -> None:
         headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
     )
     assert (res.headers.get("access-control-allow-origin") == origin) is allowed
-
-
-def test_replay_without_cache_backend_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SUPABASE_URL", raising=False)
-    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
-    res = client.post("/agent/replay/does-not-exist")
-    assert res.status_code == 503
-
-
-def test_sse_event_format() -> None:
-    raw = streaming.reasoning("hello")
-    assert raw.endswith("\n\n")
-    event_line, data_line, *_ = raw.split("\n")
-    assert event_line == "event: reasoning"
-    assert json.loads(data_line.removeprefix("data: ")) == {"text": "hello"}
-
-
-async def test_unknown_tool_is_reported_not_raised() -> None:
-    assert await execute_tool("no_such_tool", {}) == "Unknown tool: no_such_tool"

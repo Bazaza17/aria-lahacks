@@ -30,12 +30,13 @@ Only what Lincoln said explicitly. Anything not listed is open.
 - **Main track:** Applied Intelligence.
 - **Hosting:** agents run on the laptop first and on a cloud host by Sunday.
 - **Build order:** engine first (world model, routes, hazards, crowd sim), then wrap it in the agents.
+- **Cleanup (Sun Oct 18, ~4 AM):** the flood-era Claude pre-plan agent (`apps/api/app/agent`, `app/tools`, `/agent/*`, the replay prewarm script), `apps/agents` (Fetch.ai boilerplate) and migration `0003_the_dock.sql` are deleted. The engine's `venue.json` is the single venue model; the 2F event use is read as indoors (`2F_indoor`). No invented facts in anything people are told: no named assembly point, no area of refuge, no step-free claims, elevators not used.
 - **Sentry:** entered. Set it up at the start and make it strong; plan in `05-plan.md`. DSN slots go in the env files now; the SDK comes later.
 
 ## Leaning toward
 
 - **Ownership:** Lincoln on the engine, since he's also doing the scan and the floor plan. The rest of the split gets decided with the team.
-- **Fetch.ai ASI:One challenge:** fading. Lincoln doesn't see how a marketplace-listed agent fits Aria. `apps/agents` still has the uAgents setup.
+- **Fetch.ai ASI:One challenge:** fading. Lincoln doesn't see how a marketplace-listed agent fits Aria. `apps/agents` (the uAgents setup) was deleted on Sun Oct 18.
 - **Other tracks:** many of the MLH challenges, plus Creao, Photon and ElevenLabs. Note: `03-tracks.md` marks Creao as a conflict because a Creao agent has to do the core work.
 - **Add-ons to stack with the team as the build allows:** earthquake, a GoDaddy domain, Gemini or ElevenLabs, Vultr or Solana.
 - **If time allows:** a Model Learning surrogate model, a Solana report hash.

@@ -1,29 +1,68 @@
 # engine
 
-Aria's building engine: a plain Python library (no HTTP) that `apps/api` imports.
-This first slice is the **building graph** and a **fire timeline**: from one start room, when
-each room and door stops being usable for escape.
+Aria's building engine: a stdlib-only Python library (no HTTP, no runtime dependencies) that
+`apps/api` imports. It reads `venue.json`, the James West Alumni Center as a graph (63 spaces,
+99 openings, 14 exits; built from four phone LiDAR scans of 1F rooms plus the floor plan for
+everything else, see `VENUE.md`), and from one start room works out:
+
+- **fire and smoke**: when each room and door becomes unusable for escape (a zone model);
+- **exits lost**: when each exit is blocked, and until when anyone can still reach it;
+- **routes**: Aria's capacity-aware plan for every occupied room, against the routes people
+  would pick themselves, with door and stair queues;
+- a readable **summary** and the **viewer** payload the web app draws on the scan.
 
 ## Run it
 
 ```bash
 cd packages/engine
-python -m engine.fire --venue engine/data/james_west_sample.json --start f1-main-hall --growth fast --horizon 900
-python -m engine.fire --start f1-main-hall --events   # readable event list
-python -m engine.fire --start f1-main-hall --frame-step 5   # snapshots every 5 s (0: none)
-python -m pytest -q                                    # physics and venue tests
+uv run python -m engine.demo --start 140 --summary     # Collins Room fire (the default start)
+uv run python -m engine.demo --start 110 --summary     # Galleria lobby fire
+uv run pytest -q                                       # physics, venue, routes, demo, places
 ```
 
-With uv: `uv run python -m engine.fire ...` and `uv run pytest`. No runtime dependencies.
+All flags and the output format are under "Aria venue.json, routes and demo" below;
+`examples/` holds two full runs and what they show.
 
 From Python:
+
+```python
+from engine.demo import run_demo, summary_text
+
+result = run_demo(start="140")
+print(summary_text(result))
+```
+
+### Through the API
+
+The API runs the engine on demand and caches each start and growth
+(`apps/api/app/routes/engine.py`):
+
+| Endpoint | Returns |
+|---|---|
+| `GET /engine/starts` | The default start, the growth rates and every space a fire can start in |
+| `GET /engine/viewer?start=140&growth=fast` | The `viewer` block (a `FireTimeline` plus routes) the web app draws on the scan |
+| `GET /engine/summary?start=140&growth=fast` | Scenario, summary, exits, origin and the responder size-up |
+
+`run(start, growth)` in that module returns the full `run_demo` result for other API code (the live layer).
+
+## The fire model core (`engine.fire`)
+
+`engine.fire` is the zone model underneath. Run on its own it defaults to
+`engine/data/james_west_sample.json`, a **legacy 12-room sample** from before `venue.json`
+existed (see "Sample venue" below). Nothing in the demo, the API or the web app uses that file;
+it is kept only as `python -m engine.fire`'s default and for `tests/test_venue.py`.
+
+```bash
+python -m engine.fire --start f1-main-hall --growth fast --horizon 900   # sample venue
+python -m engine.fire --start f1-main-hall --events                      # readable event list
+```
 
 ```python
 from engine.venue import load_venue
 from engine.fire import simulate
 
 tl = simulate(load_venue(), "f1-main-hall", growth="fast", horizon_s=900, frame_step_s=10)
-tl.blocked_at(300)   # {"f1-main-hall", "d-north-patio", ...}: rooms and doors you can't use at t=300 s
+tl.blocked_at(300)   # rooms and doors you can't use at t=300 s
 tl.to_dict()         # the JSON the CLI prints
 ```
 
@@ -63,14 +102,12 @@ mesh and the frame:
 The sample footprints are a rough first pass traced from the scan's shape. Floor 2 isn't in the
 scan, so its footprints are placeholders laid over floor 1.
 
-### Sample venue (unverified)
+### Sample venue (legacy)
 
-`engine/data/james_west_sample.json` is **sample data**. Its exits, stairwells, refuge area and
-assembly point match `apps/messenger/src/venue.ts`. The floor 1 sizes are rough reads of the
-10/17 Polycam scan: about 34 × 22 m overall, a tall west section (5–6 m ceiling) taken as the
-main hall, and 3–4 m ceilings elsewhere. Room areas come from the traced footprints. Floor 2 isn't in the scan, so its rooms are placeholders.
-Door states assume an event night: hall doors propped open, exterior and stair doors closed.
-Replace it with the traced floor plan when that exists.
+`engine/data/james_west_sample.json` is an early hand-made **sample**: 12 rooms read roughly off
+the first scan, with invented floor 2 rooms, exits and an assembly point. It is not the venue.
+The real model is `venue.json` (see `VENUE.md`), which `engine.demo`, the API and the web app
+use. The sample stays only as the default for `python -m engine.fire` and its tests.
 
 ## The fire model, in plain language
 
@@ -142,9 +179,8 @@ At the 10 s default the sample run is about 90 frames and about 200 KB of indent
 
 ### Storage
 
-The venue JSON lives in the repo (`engine/data/`). Timelines aren't stored: the API computes one
-on request (a 900 s run takes milliseconds) and returns this JSON. Caching in Supabase can come
-later if it's ever needed.
+`venue.json` lives in the repo. Results aren't stored: the API runs the engine on request (about
+1 s per run) and keeps recent runs in memory.
 
 ## Assumptions and limits
 
@@ -161,12 +197,6 @@ later if it's ever needed.
 - Values marked ASSUMPTION in `constants.py` (wall heat loss, spread delay, unrated door hold,
   some fuel classes) are judgment calls, not values from a standard.
 - This is a planning estimate for a hackathon demo, not a code-compliance analysis.
-
-## Next slice
-
-Time-dependent routes: shortest paths from every room to every exit over the graph, removing
-whatever `Timeline.blocked_at(t)` returns.
-
 
 ## Aria venue.json, routes and demo (slice 1)
 

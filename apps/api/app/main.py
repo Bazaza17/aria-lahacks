@@ -18,12 +18,11 @@ from app.brand import PRODUCT_NAME
 from app.creao.mcp import mount as creao_mcp
 from app.creao.runtime import lifespan as creao_lifespan
 from app.ratelimit import limiter
-from app.routes import agent, engine, live
+from app.routes import engine, live
 
 # --- Sentry --------------------------------------------------------------
-# Off unless SENTRY_DSN is set. FastAPI/Starlette and Anthropic integrations
-# auto-enable; send_default_pii lets the Anthropic one record prompts and
-# tool I/O. capture_sentry_logs forwards stdlib logging to Sentry Logs.
+# Off unless SENTRY_DSN is set. The FastAPI/Starlette integration auto-enables;
+# capture_sentry_logs forwards stdlib logging to Sentry Logs.
 if os.environ.get("SENTRY_DSN"):
     sentry_sdk.init(
         dsn=os.environ["SENTRY_DSN"],
@@ -66,7 +65,6 @@ app.add_middleware(
     allow_headers=["Content-Type", "Accept", "sentry-trace", "baggage"],
 )
 
-app.include_router(agent.router)
 app.include_router(live.router)  # the CREAO layer: live incidents, exit tracking, command staff
 app.include_router(engine.router)  # the building engine (packages/engine), run on demand
 

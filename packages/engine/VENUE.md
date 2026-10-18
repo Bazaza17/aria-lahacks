@@ -2,7 +2,9 @@
 
 `venue.json` is the engine's first building model (schema v0.1). It describes rooms and outdoor areas as **spaces** and every way between them as **openings**. Fire, routes and crowd all read it. It was built from:
 - the checked annunciator-plan inventory (`docs/lahacks/venue-plan-inventory.json`);
-- the first three scans (`docs/lahacks/10-scan-room1.md`, `11-venue-plan-and-scans.md`).
+- four phone LiDAR scans of 1F rooms (`docs/lahacks/10-scan-room1.md`, `11-venue-plan-and-scans.md`; the fourth, room 4, is the Collins Room).
+
+Only those four scans are measured. The rest of 1F, all of 2F and the 3F come from the floor plan (the annunciator); label them that way wherever they are shown.
 
 Where a scan and the plan disagree, the scan wins and the note says so. Values nobody has measured yet are placeholders and are marked as such. The file is meant to be edited by hand.
 
@@ -15,7 +17,7 @@ Today it holds 63 spaces (38 on 1F, 24 on 2F, 1 on 3F) and 99 openings: 14 exits
 - **Units:** metres and seconds.
 - **Axes:** Y is up. Plan positions are `[x, z]` in **room 2's scan frame** (the lobby 110 scan), so `room2.glb` drops in with no transform.
 - **Elevation 0.0** is lobby 110's finished floor, which is Y −3.91 in room 2's file. Any elevation is room 2's Y + 3.91.
-- **Other scans:** rooms 1 and 3 map in with the transforms in `frame.scan_transforms`. They are good to about ±0.3 m near the junction of the three scans.
+- **Other scans:** rooms 1 and 3 map in with the transforms in `frame.scan_transforms`. They are good to about ±0.3 m near the junction of the scans. Room 4 (the Collins Room) has no entry there: it is already in the venue frame in the stitched four-room mesh, `venue_4rooms_web.glb` (Supabase Storage, `scans/james_west/`).
 - **Plan positions:** anything read off the annunciator photo uses `frame.photo_to_venue`: x = −7.5 + (937 − X)/10.4 and z = (539 − Y)/10.4, where X and Y are photo pixels. For the 2F plan, subtract 578 from Y first. Expect ±1–2 m, because the photo was taken at an angle.
 - **North is not verified.** If the compass's solid needle is north, north is −z and east is +x.
   - The venue's own names point the other way: the "west" exterior stair and the Collins Room's "west" exits sit at +x, which this reading calls east.
@@ -42,11 +44,11 @@ Today it holds 63 spaces (38 on 1F, 24 on 2F, 1 on 3F) and 99 openings: 14 exits
 | `area` | m², computed from the polygon |
 | `floor_elevation` | m above the datum. Nonzero on 1F: the Galleria far end +0.62, 150 and the Collins Patio's south part +0.62 (unverified), the porch +0.62 (assumed), the Founders' lawn −0.6 |
 | `height` | Ceiling above the floor, in m. `null` for open-sky outdoor spaces |
-| `height_source` | `scan` (measured: 110, the Galleria far end, `corridor_core`, 120) or `placeholder` (3.0 m, including the 2F skylight wells). `null` outdoors |
+| `height_source` | `scan` (measured: 110, the Galleria far end, `corridor_core`, 120, 140, 150) or `placeholder` (3.0 m, including the 2F skylight wells). `null` outdoors |
 | `occupant_load`, `occupant_load_source` | People in the default scenario; see the load rules below |
 | `detectors` | Alarm-device dots on the annunciator. One symbol covers all device types |
 | `geometry_source` | `scan`: footprint measured by a scan. `plan_traced`: plan outline, nudged to scan walls where they exist. `plan_bbox`: rectangle from the plan |
-| `scanned_by` | Which scans (`room1`, `room2`, `room3`) cover the space |
+| `scanned_by` | Which scans (`room1` to `room4`) cover the space |
 | `pin` | Optional `[x, z]`: where place lookup puts the space's pin, on clear scanned floor. Set where the default point inside the polygon lands on furniture or a hole in the scan (`galleria_far_end`, `120`, `150`) |
 | `notes` | Free text |
 
@@ -108,13 +110,13 @@ Example:
 ## Widths and occupant loads
 
 **Widths.**
-- Scan measurements are used where the docs give them. There are 8: the Founders' opening (4.5), the ANN door frame (1.7), D1 (1.2), the 100G door (1.05), the Galleria step (10.0), the ramp (1.5), the lawn steps (14.0) and the plaza's open court (13.5).
-- `plan` widths (23) are used only where the drawing clearly shows the gap, such as open sides, passages between walls, the stair-enclosure gap into the Collins Patio (5.5), well edges and the elevator shaft.
-- The other 68 are placeholders:
+- Scan measurements are used where the docs give them. There are 11: the Founders' opening (4.5), the ANN door frame (1.7), D1 (1.2), the 100G door (1.05), the Galleria step (10.0), the ramp (1.5), the lawn steps (14.0), the plaza's open court (13.5), and from the Collins Room scan the 110–140 opening (3.3), the Galleria–150 opening (9.3) and the 140/150 step (12.7).
+- `plan` widths (22) are used only where the drawing clearly shows the gap, such as open sides, passages between walls, the stair-enclosure gap into the Collins Patio (5.5), well edges and the elevator shaft.
+- The other 66 are placeholders:
   - single door 0.9 (40);
   - double door 1.8 (8);
   - gate 1.5 (7);
-  - cased opening 1.5 (6);
+  - cased opening 1.5 (4);
   - interior stair 1.1 (4) and exterior stair 1.5 (1);
   - elevator door 0.9, with effective width 0 (2).
 
@@ -149,7 +151,7 @@ Example:
 5. If the 2F elevation is measured, update the storey, every stair's `rise` and `length`, the elevator's `rise` and the 3F elevation together.
 6. Keep ids stable. If a space must be split, give it new ids and say so in the notes.
 
-Scanning is done and no tape measurements are planned (`docs/lahacks/01-decisions.md`), so these stay placeholders unless a scan already holds the answer. A fourth scan (the Collins Room) was taken but is not folded in yet.
+Scanning is done and no tape measurements are planned (`docs/lahacks/01-decisions.md`), so these stay placeholders unless a scan already holds the answer. All four scans are folded in; the Collins Room scan (room 4) set 140's and 150's outlines, heights and the openings around them (see `changelog` in the file).
 
 **What would settle the most, if anyone checks on site:**
 - the 2F elevation (count risers on the west stair);
@@ -159,8 +161,7 @@ Scanning is done and no tape measurements are planned (`docs/lahacks/01-decision
 - the main entrance and porch door leaves, and 120's two exterior doors;
 - the Founders' opening and the ANN door frame;
 - the Collins Patio and PATIO fence gates;
-- the 140/150 band and the Galleria–Collins openings;
-- whether the terrace is outdoors, and which 2F reading the event uses.
+- whether the terrace is outdoors. (Which 2F reading the event uses is decided: `2F_indoor`.)
 
 ## Current unknowns (short form; full list in the file)
 
@@ -172,9 +173,9 @@ Scanning is done and no tape measurements are planned (`docs/lahacks/01-decision
   - 230 and 330 have a single route.
   - In a Galleria fire the 2F is left with `ST-W` alone.
 - **Terrace:** assumed outdoor. Either way it is elevated exit access, not a place of safety.
-- **Event 2F use:** unresolved, so both readings are in `occupant_scenarios`. The default is the indoor 2F, the stress case.
+- **Event 2F use:** decided. The workshops and networking were upstairs indoors, so the default `occupant_scenarios` entry is `2F_indoor` (also the stress case). `2F_terrace` stays in the file as the alternative reading.
 - **Openings that may close:** the Founders' opening may be an operable wall. The ANN door frame may hold fire doors that close on alarm. D1 may be a bulkhead.
-- **Galleria–Collins openings and the 140/150 step:** unverified.
+- **Galleria–Collins openings and the 140/150 step:** measured on the Collins Room scan, but whether `O-galleria_far_end-150` and `O-110-140` stay open on the night is unverified.
 - **200ST landing:** its door swing is read as the closed strip's door. It could instead be 219's door onto the landing.
 - **Stairs:** 100ST and the NE stair are treated as unprotected. Skylight-well edges at 2F are assumed open for smoke.
 - **Inferred links:** several doors and links are assumed (notes start `INFERRED`). The space north of 130D is a dead end. The service yard SE of 110 may be indoors.

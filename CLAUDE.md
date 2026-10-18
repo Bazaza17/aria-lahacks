@@ -6,22 +6,22 @@
 
 - **Name:** Aria
 - **One-liner:** Aria turns a phone scan of a building into a fire pre-plan: how fire spreads, which exits stay open, how long everyone takes to get out, and a size-up for responders.
-- **Demo flow:** [the 3–5 steps judges will see]
+- **Demo flow:** scan → pick where the fire starts → engine shows smoke, lost exits and routes → declare the drill on the live console → agents text/call people with engine routes, dispatcher approves.
 - **Deadline:** Sun Oct 18, 12:00 PM PDT. Judging at 12:30 PM, in person.
 - **Goal:** win. Main track: Applied Intelligence. Other company challenges are open, favoring recruiting benefits and good cash prizes (`docs/lahacks/03-tracks.md`).
 - **Sentry:** entered. Set it up at the start and collect the "moments" all weekend (plan in `docs/lahacks/05-plan.md`).
 - **Team:** Lincoln plus two teammates. Lincoln leans toward the engine (he's also doing the scan and floor plan). [the rest of the split; see Parallel sessions]
-- **Build order:** engine first (world model → routes → fire timeline → crowd sim), then wrap it in agents: an orchestrator plus world model, hazard, evac sim and report specialists.
-- **Stack:** Next.js 16 + React 19 + Tailwind 4 + Three.js + Mapbox (`apps/web`), FastAPI + Claude tool loop over SSE (`apps/api`), Supabase (`infra/supabase`), the engine in `packages/engine` (empty), agents in `apps/agents` [agent framework: Fetch.ai uAgents + ASI:One is set up there, but Fetch.ai is fading, so this is open]. Agents run on the laptop first and on a cloud host by Sunday.
+- **Build order:** engine first (world model → routes → fire timeline → crowd sim), then the live layer: CREAO command staff, messenger and the dispatcher console, fed by the engine.
+- **Stack:** Next.js 16 + React 19 + Tailwind 4 + Three.js + Mapbox (`apps/web`, Vercel); FastAPI (`apps/api`, Railway) serving the engine on demand (`/engine/*`) and the CREAO live layer (`/live/*`, `/mcp`, TigerData); the engine in `packages/engine` (venue.json, fire, smoke, exits, routes); the messenger in `apps/messenger` (Photon texts + ElevenLabs calls, on a teammate's machine); Supabase (`infra/supabase`) for the venue row and the scan mesh.
 - **Context:** `docs/lahacks/`. Start with `00-start-here.md`; what's decided and what's open is in `01-decisions.md`.
 
 ## What changes from the Miami version
 
 The code came from Aria's Miami build. This weekend:
 
-- **Flood → fire.** Fire is the main hazard. The prompt, report schema, tools, scenario slider, evac logic, 3D layers and copy are all built around storm surge today.
-- **The Dock → the venue.** The venue (James West Alumni Center, UCLA) replaces the one hardcoded Miami building. Per-building data is keyed by hardcoded IDs across `apps/web/lib/`, the scan viewer, tests, the replay script and a seed migration.
-- **The map.** Mapbox and the landing-page globe open on Miami.
+- **Flood → fire.** Fire is the main hazard. The flood-era Claude pre-plan agent (prompt, report schema, tools, replay cache) has been removed from the API; the engine replaces it.
+- **The Dock → the venue.** The venue (James West Alumni Center, UCLA) replaces the one hardcoded Miami building. The venue row is `547b5ec5-30c5-4f76-8080-012a52e90bd9` (`infra/supabase/migrations/0005_venue.sql`, `NEXT_PUBLIC_VENUE_BUILDING_ID`).
+- **The map.** Done: the dashboard map centres on the venue and the landing-page globe faces Los Angeles.
 - **Supabase.** A new project replaces Aria's.
 
 Every file involved, plus the Supabase steps: `docs/lahacks/07-changes.md`.
@@ -32,20 +32,21 @@ At the start of the first session, and whenever I say **"questions"**:
 
 1. **Ask me everything that's still pending** so we can narrow the plan: the Open list in `docs/lahacks/01-decisions.md`, "Still to make" in `docs/lahacks/05-plan.md`, the brackets in this file, and what venue data I have so far (`docs/lahacks/06-venue-data.md`). Ask lots of questions, a few at a time, multiple choice where it fits (the AskUserQuestion tool), with your recommendation first when you have one. Write my answers into `01-decisions.md`, then narrow `05-plan.md` into a concrete first slice.
 2. **Then do the setup.** Every step is in `docs/lahacks/07-changes.md`:
-   - The new Supabase project: migrations `0001`, `0002` and `0004` (skip `0003`), the public `scans` bucket, and the venue row with the right address and coordinates. If you can reach the database (Supabase MCP, CLI or `psql`), run it; otherwise give me the SQL to paste into the SQL editor.
+   - The new Supabase project: migrations `0001`, `0002`, `0004` and `0005` (the venue row; see `infra/supabase/README.md`), and the public `scans` bucket. If you can reach the database (Supabase MCP, CLI or `psql`), run it; otherwise give me the SQL to paste into the SQL editor.
    - Mapbox: the token in `apps/web/.env.local`, and the dashboard map centered on the venue instead of Miami.
-   - The env files for web, API and agents.
+   - The env files for web, API and messenger.
 
    Ask me for each value you need (project URL, keys, coordinates, Mapbox token). Secrets go only in the gitignored env files; never commit them or repeat them back.
 
 ## Commands
 
-- Env files: copy each `.env.example` to `apps/web/.env.local`, `apps/api/.env` and `apps/agents/.env`.
+- Env files: copy each `.env.example` to `apps/web/.env.local`, `apps/api/.env` and `apps/messenger/.env`. A real `apps/api/.env` points at the shared live database: don't run the API locally with it unless you mean to.
 - Web: `pnpm --dir apps/web dev` → http://localhost:3000
 - API: `cd apps/api && uv run uvicorn app.main:app --reload --reload-dir app --port 8000`
 - Both at once: `pnpm dev` (it runs `apps/api/dev.sh`, so it needs a bash shell)
 - Checks: `pnpm check` (web lint, format, typecheck and unit tests; API ruff and pytest)
-- Agents: toolchain check in `apps/agents/README.md`
+- Engine: `cd packages/engine && uv run python -m engine.demo --start 140 --summary`, tests `uv run pytest -q`
+- Messenger: `apps/messenger/README.md`
 
 ## Rules for this repo
 
@@ -64,7 +65,7 @@ This is a time-boxed hackathon. These instructions override the global ECC rules
 4. **Smallest change that works.** No refactors, abstractions, or "nice to have" architecture unless they unblock the demo.
 5. **Ship in thin slices.** Get each feature working end to end before polishing anything.
 6. **Mock what's slow.** If an external API or feature would take more than ~30 minutes, propose a mock or hardcoded fallback first.
-7. **Keep the app runnable at all times.** After each change, make sure it still builds (`pnpm --dir apps/web build`) and the API and agents still start. If something breaks, fixing it is the top priority.
+7. **Keep the app runnable at all times.** After each change, make sure it still builds (`pnpm --dir apps/web build`) and the API still starts. If something breaks, fixing it is the top priority.
 8. **Commit often** with short conventional messages (`feat:`, `fix:`) so we can roll back.
 
 ## ECC
@@ -97,11 +98,11 @@ My global ECC setup (agents, skills, commands and the GateGuard hook) is install
 Three people, each running their own sessions. Per person, keep it to 2–3 sessions at a time (more burns usage fast), each in its own worktree (desktop app: new session → Local → worktree). `.worktreeinclude` copies the env files into new worktrees. Stay inside your assigned area and don't edit files owned by another session:
 
 - **Lincoln (leaning) — Engine:** `packages/engine/` (world model, routes, fire, crowd sim)
-- **[Name] — Agents and API:** `apps/agents/`, `apps/api/`, Supabase
+- **[Name] — Live layer and API:** `apps/api/`, `apps/messenger/`, Supabase
 - **[Name] — Web:** `apps/web/` (viewer, map, report)
 - **[Who] — Non-code:** pitch deck, README, demo script, Devpost
 
-Shared contracts: the report schema lives in `apps/api/app/agent/prompts.py` and is copied by hand into `apps/web/lib/types.ts`; the database lives in `infra/supabase/migrations/`. Say so before changing either, and when you do change one, tell whoever depends on it. Sessions on the same machine can message each other ("tell the web session the report schema changed").
+Shared contracts: the engine output (`packages/engine`, served by `apps/api/app/routes/engine.py`) and what `apps/web/lib/scan-fire.ts` reads from it; the live layer's events (`docs/creao-layer.md`), which the messenger consumes; the database lives in `infra/supabase/migrations/`. Say so before changing either, and when you do change one, tell whoever depends on it. Sessions on the same machine can message each other ("tell the web session the report schema changed").
 
 [edit to match the actual split]
 

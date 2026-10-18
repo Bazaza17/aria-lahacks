@@ -1,7 +1,7 @@
 [project]
 name = "api"
 version = "0.1.0"
-description = "Pre-incident planning agent API"
+description = "Aria API: the building engine on demand and the CREAO live response layer"
 requires-python = ">=3.12"
 dependencies = [
     "aiosqlite>=0.21",
