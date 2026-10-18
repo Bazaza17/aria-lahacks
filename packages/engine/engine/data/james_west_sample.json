@@ -1,0 +1,59 @@
+{
+  "name": "James West Alumni Center, UCLA",
+  "verified": false,
+  "notes": [
+    "SAMPLE DATA, NOT VERIFIED. Layout matches apps/messenger/src/venue.ts (exits, stairwells, refuge, assembly point).",
+    "Floor 1 sizes are rough reads of the 10/17 Polycam scan: footprint about 34 x 22 m, a tall west section (about 5-6 m ceiling) taken as the main hall, 3-4 m ceilings elsewhere.",
+    "Footprints and door positions are a rough first pass traced from the scan's shape (axis-aligned boxes in GLB mesh coordinates, see scan); room areas and perimeters come from them.",
+    "Floor 2 is not in the scan; its rooms, footprints, sizes and the 4.5 m floor elevation are placeholders.",
+    "Door states are the event-night assumption: interior hall doors propped open, exterior and stair doors closed."
+  ],
+  "scan": {
+    "file": "10_17_2026.glb",
+    "frame": "GLB mesh coordinates, metres, Y up, no node transforms",
+    "floor_y": -0.85,
+    "note": "rough first pass traced from scan shape"
+  },
+  "floors": [
+    { "level": 1, "elevation_m": 0.0 },
+    { "level": 2, "elevation_m": 4.5 }
+  ],
+  "assembly_point": "North lawn, across from Pauley Pavilion",
+  "refuge_areas": [{ "room": "stair-a", "floor": 2, "label": "Floor 2 landing of Stairwell A" }],
+  "rooms": [
+    { "id": "f1-main-hall", "name": "Main hall", "floor": 1, "footprint": { "x": [-16, 4], "z": [-10, 1] }, "ceiling_height_m": 5.5, "fuel_class": "assembly", "window_area_m2": 12, "window_height_m": 2.0 },
+    { "id": "f1-lobby", "name": "Lobby", "floor": 1, "footprint": { "x": [-4, 4], "z": [1, 9] }, "ceiling_height_m": 3.5, "fuel_class": "circulation", "window_area_m2": 4, "window_height_m": 2.0 },
+    { "id": "f1-east-hall", "name": "East hallway", "floor": 1, "footprint": { "x": [4, 16], "z": [-1, 2] }, "ceiling_height_m": 3.0, "fuel_class": "circulation" },
+    { "id": "f1-kitchen", "name": "Kitchen", "floor": 1, "footprint": { "x": [4, 9], "z": [2, 6] }, "ceiling_height_m": 3.0, "fuel_class": "kitchen", "window_area_m2": 2 },
+    { "id": "f1-restrooms", "name": "Restrooms", "floor": 1, "footprint": { "x": [9, 13], "z": [2, 6] }, "ceiling_height_m": 3.0, "fuel_class": "restroom" },
+    { "id": "f1-meeting", "name": "Meeting room", "floor": 1, "footprint": { "x": [12, 16], "z": [-4, -1] }, "ceiling_height_m": 3.0, "fuel_class": "assembly", "window_area_m2": 3 },
+    { "id": "stair-a", "name": "Stairwell A", "kind": "stair", "floors_served": [1, 2], "floor": 1, "footprint": { "x": [-7, -4], "z": [2, 5] }, "ceiling_height_m": 7.5, "fuel_class": "stair" },
+    { "id": "stair-b", "name": "Stairwell B", "kind": "stair", "floors_served": [1, 2], "floor": 1, "footprint": { "x": [13, 16], "z": [2, 6] }, "ceiling_height_m": 7.5, "fuel_class": "stair" },
+    { "id": "f2-corridor", "name": "Floor 2 corridor", "floor": 2, "footprint": { "x": [-4, 13], "z": [2, 4] }, "ceiling_height_m": 3.0, "fuel_class": "circulation" },
+    { "id": "f2-boardroom", "name": "Boardroom", "floor": 2, "footprint": { "x": [-4, 4], "z": [4, 9] }, "ceiling_height_m": 3.0, "fuel_class": "assembly", "window_area_m2": 4 },
+    { "id": "f2-offices", "name": "Offices", "floor": 2, "footprint": { "x": [4, 13], "z": [-1, 2] }, "ceiling_height_m": 3.0, "fuel_class": "office", "window_area_m2": 4 },
+    { "id": "f2-lounge", "name": "Lounge", "floor": 2, "footprint": { "x": [4, 13], "z": [4, 7] }, "ceiling_height_m": 3.0, "fuel_class": "assembly", "window_area_m2": 4 }
+  ],
+  "doors": [
+    { "id": "d-west-main", "name": "West main entrance", "a": "f1-lobby", "b": "outside", "position": { "x": 0, "z": 9 }, "width_m": 1.8, "open": false, "fire_rating_min": 0 },
+    { "id": "d-east-side", "name": "East side door", "a": "f1-east-hall", "b": "outside", "position": { "x": 16, "z": 0.5 }, "width_m": 0.9, "open": false, "fire_rating_min": 0 },
+    { "id": "d-north-patio", "name": "North patio doors", "a": "f1-main-hall", "b": "outside", "position": { "x": -6, "z": -10 }, "width_m": 2.4, "open": false, "fire_rating_min": 0 },
+    { "id": "d-lobby-hall", "name": "Lobby to main hall", "a": "f1-lobby", "b": "f1-main-hall", "position": { "x": 0, "z": 1 }, "width_m": 2.4, "open": true },
+    { "id": "d-hall-east", "name": "Main hall to east hallway", "a": "f1-main-hall", "b": "f1-east-hall", "position": { "x": 4, "z": 0 }, "width_m": 1.8, "open": true },
+    { "id": "d-east-kitchen", "name": "East hallway to kitchen", "a": "f1-east-hall", "b": "f1-kitchen", "position": { "x": 6.5, "z": 2 }, "width_m": 0.9, "open": false, "fire_rating_min": 0 },
+    { "id": "d-east-restrooms", "name": "East hallway to restrooms", "a": "f1-east-hall", "b": "f1-restrooms", "position": { "x": 11, "z": 2 }, "width_m": 0.9, "open": false, "fire_rating_min": 0 },
+    { "id": "d-east-meeting", "name": "East hallway to meeting room", "a": "f1-east-hall", "b": "f1-meeting", "position": { "x": 14, "z": -1 }, "width_m": 0.9, "open": true },
+    { "id": "d-stair-a-1", "name": "Stairwell A, floor 1", "a": "f1-lobby", "b": "stair-a", "floor": 1, "position": { "x": -4, "z": 3.5 }, "width_m": 0.9, "open": false, "fire_rating_min": 90 },
+    { "id": "d-stair-b-1", "name": "Stairwell B, floor 1", "a": "f1-east-hall", "b": "stair-b", "floor": 1, "position": { "x": 14.5, "z": 2 }, "width_m": 0.9, "open": false, "fire_rating_min": 90 },
+    { "id": "d-stair-a-2", "name": "Stairwell A, floor 2", "a": "f2-corridor", "b": "stair-a", "floor": 2, "position": { "x": -4, "z": 3 }, "width_m": 0.9, "open": false, "fire_rating_min": 90 },
+    { "id": "d-stair-b-2", "name": "Stairwell B, floor 2", "a": "f2-corridor", "b": "stair-b", "floor": 2, "position": { "x": 13, "z": 3 }, "width_m": 0.9, "open": false, "fire_rating_min": 90 },
+    { "id": "d-corr-boardroom", "name": "Corridor to boardroom", "a": "f2-corridor", "b": "f2-boardroom", "position": { "x": 0, "z": 4 }, "width_m": 0.9, "open": true },
+    { "id": "d-corr-offices", "name": "Corridor to offices", "a": "f2-corridor", "b": "f2-offices", "position": { "x": 8, "z": 2 }, "width_m": 0.9, "open": false, "fire_rating_min": 0 },
+    { "id": "d-corr-lounge", "name": "Corridor to lounge", "a": "f2-corridor", "b": "f2-lounge", "position": { "x": 8, "z": 4 }, "width_m": 1.8, "open": true }
+  ],
+  "exits": [
+    { "id": "west-main", "label": "West main entrance", "door": "d-west-main", "accessible": true },
+    { "id": "east-side", "label": "East side door", "door": "d-east-side", "accessible": true },
+    { "id": "north-patio", "label": "North patio doors", "door": "d-north-patio", "accessible": true }
+  ]
+}

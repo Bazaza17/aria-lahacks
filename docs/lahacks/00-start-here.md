@@ -14,6 +14,7 @@ These notes live in three places with the same content: this repo (`docs/lahacks
 6. `03-tracks.md`: every track and prize, what it needs, how it's judged, and how Aria could fit
 7. `06-venue-data.md`: what to capture at the venue
 8. `09-engine-research.md`: what already exists for each engine piece (install-tested), with options for the open decisions
+   - `10-scan-room1.md` and `11-venue-plan-and-scans.md`: what the first scans and the venue's floor plans show, and what to scan next (`venue-plan-inventory.json` is the plan as data)
 9. `C:\Users\lincb\Documents\LA_hacks\LA_Hacks_AI_Hackathon_2026.md`: full event info (schedule, submission, Fetch.ai details). Its MLH prize list is out of date; `03-tracks.md` has the event's own list.
 
 ## First message for Claude Code
