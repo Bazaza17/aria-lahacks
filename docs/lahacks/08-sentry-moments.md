@@ -53,16 +53,16 @@ Places in Aria's pipeline where a moment is likely. None of these has happened y
 - **Slow step in a full pre-plan (Tracing).** In a viewer → API → engine → Claude trace, one span dominates: the engine, a Supabase call, or a Claude turn. Fix it and show the trace before and after.
 - **Wasted Claude calls (AI agent monitoring).** The agent calls the same tool twice, re-reads the whole building each turn, or burns tokens on a step a plain function could do. Show calls and tokens per pre-plan before and after.
 - **Viewer fails on a big GLB scan (Session Replay).** The venue scan loads slowly or blank on a phone or a slow network. The replay shows what the user saw, and the trace shows how long the download took.
-- **Errors swallowed in the agent stream (Errors + Logs).** A failing agent run shows up only as an `error` SSE event in the browser, with nothing in Sentry (see the first known gap). Fixing that gap and then catching a real failure is itself a moment.
+- **Errors swallowed in the agent stream (Errors + Logs).** A failing agent run shows up only as an `error` SSE event in the browser, with nothing in Sentry (the first known gap, fixed Sat evening). Catching a real failure now that it's fixed is the moment.
 - **Cloud agents go down (Uptime).** The Railway host sleeps or crashes; the uptime monitor alerts before a judge finds it.
 
-## Known gaps (fix later)
+## Known gaps
 
-Listed only; nothing here is fixed yet.
+1–3 fixed Sat Oct 17 evening; 4 is still open.
 
-1. **Agent stream errors never reach Sentry.** `_captured_stream` in `apps/api/app/routes/agent.py` (line 111) catches every exception and turns it into an SSE `error` event, so Sentry never sees it. It needs a `sentry_sdk.capture_exception(e)` before the yield.
-2. **Tool executions aren't spans.** The Claude tool loop runs tools without an `execute_tool` span (and agents without an `invoke_agent` span), so the Agents dashboard shows the Claude calls but not the tool time between them.
-3. **No `tunnelRoute` in the web app.** Ad blockers can drop browser events, replays and traces during judging. Set `tunnelRoute` in `withSentryConfig` (`apps/web/next.config.ts`).
+1. ~~**Agent stream errors never reach Sentry.**~~ **Fixed in `d2f4743`.** `_captured_stream` in `apps/api/app/routes/agent.py` now calls `sentry_sdk.capture_exception(e)` before yielding the SSE `error` event. Checked with a synthetic failing run: it became [ARIA-API-2](https://aria-lahacks.sentry.io/issues/ARIA-API-2) (env `verify`, safe to resolve) and the browser still got the `error` event.
+2. ~~**Tool executions aren't spans.**~~ **Fixed in `e1be8ed`.** `apps/api/app/agent/loop.py` wraps each run in a `gen_ai.invoke_agent` span (`invoke_agent Aria pre-plan`) and each tool call in a `gen_ai.execute_tool` span (`execute_tool <tool>`, with `gen_ai.tool.call.arguments` / `.result`), per the sentry-sdk 2.72 manual agent instrumentation. Tools running in parallel show as siblings. Checked through the real `POST /agent/run` route with a fake Claude client: [trace](https://aria-lahacks.sentry.io/explore/traces/trace/f824894c560e44a392e468f43a886340) (env `verify`) shows `/agent/run` → `invoke_agent` → two `execute_tool` spans. **Still to see:** a live run with real Claude `gen_ai.chat` spans under `invoke_agent` (`ANTHROPIC_API_KEY` is empty in `apps/api/.env`).
+3. ~~**No `tunnelRoute` in the web app.**~~ **Fixed in `7e7239a`.** `tunnelRoute: "/aria-relay"` in `apps/web/next.config.ts`. Checked locally: the browser posts every Sentry envelope to `/aria-relay?o=…&p=…&r=us` (200) and nothing goes straight to `sentry.io`. There's no `proxy.ts`/`middleware.ts`; if one is added, exclude `/aria-relay` in its `matcher`.
 4. **Cloud environment tags.** Set `SENTRY_ENVIRONMENT=cloud` on Railway and `NEXT_PUBLIC_SENTRY_ENVIRONMENT=cloud` on Vercel (plus both DSNs), or cloud events will be tagged `laptop`.
 
 ## Recommended Sentry-side setup
@@ -94,4 +94,4 @@ Fill from the moments log. Keep each moment to 2 to 3 sentences with a number an
 >
 > **How we used the Sentry MCP:** [how Claude Code read traces/issues while fixing bugs, with one example].
 >
-> **What we'd add next:** [e.g. uptime alerts after the event, tool spans].
+> **What we'd add next:** [e.g. uptime alerts after the event].
