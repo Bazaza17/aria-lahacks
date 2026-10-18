@@ -1,20 +1,25 @@
-"""Slice-1 demo: venue.json -> fire timeline -> predictive vs reactive routes -> one JSON.
+"""Slice-1 demo: venue.json -> fire timeline -> Aria's plan vs reactive routes -> one JSON.
 
     uv run python -m engine.demo --start 140 --summary
-    uv run python -m engine.demo --start 110 --growth fast --departures 0,60,120,180,300 \\
+    uv run python -m engine.demo --start 110 --departures 0,60,120,180,300 \\
         --frame-step 30 --out aria_110.json
 
-Loads venue.json through engine.aria_venue, runs engine.fire.simulate on the adapted venue,
-maps the timeline back to venue ids and routes every indoor space to SAFE at each departure time.
+Loads venue.json through engine.aria_venue, runs engine.fire.simulate on the adapted venue
+(with a 600 °C layer flashover criterion), maps the timeline back to venue ids, then at each
+departure time routes every indoor space to SAFE twice: Aria's capacity-aware predictive plan
+and the reactive routes people would take from what they see, both checked for door and stair
+flow. It also scans departure times to find where the plan matters most.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
+from engine import outputs, summary
 from engine.aria_venue import (
     EVENT_NIGHT_RULES,
     K_LEVEL_M_S,
@@ -27,38 +32,93 @@ from engine.aria_venue import (
     load_aria_venue,
 )
 from engine.constants import ALPHA_KW_S2
-from engine.fire import Timeline, simulate
-from engine.routes import Blocks, evacuate, exits_lost, venue_timeline
+from engine.evacuate import evacuate
+from engine.fire import simulate
+from engine.route_graph import FS_LEVEL_P_S_M, FS_STAIR_P_S_M
+from engine.routes import (
+    FLASHOVER_LAYER_C,
+    MARGINAL_S,
+    ORIGIN_LIMIT_KW,
+    Blocks,
+    exit_reach,
+    exit_sides,
+    exits_lost,
+    venue_timeline,
+)
 
-SCHEMA_VERSION = "aria-engine-demo/1"
+SCHEMA_VERSION = "aria-engine-demo/2"
 DEFAULT_START = "140"  # Collins Room, part 140: the biggest hacking area
 DEFAULT_DEPARTURES = (0.0, 60.0, 120.0, 180.0, 300.0)
+DEFAULT_SCAN_STEP_S = 15.0
 
 ASSUMPTIONS = [
     "Fire: engine.fire screening zone model (t² growth capped by fuel and air, NFPA 92 plume, "
-    "one smoke layer per room, buoyant door spill, Thomas flashover, ISO 13571-style "
-    "untenability: layer below 2 m or above 200 °C). No sprinklers, smoke control or fire "
-    "service: a worst-case pre-plan.",
-    "Skylight wells: each open_to_below space and the 1F spaces under it are ONE fire room: the "
-    "1F floor area, with the ceiling set so the box holds the true volume (1F rooms plus the "
-    "wells up to their tops). 2F well edges are doors of that room at the 2F level.",
-    "Merged-room members on a different floor level (the Galleria far end, +0.62 m) are judged "
-    "untenable from their own floor, using the room's layer at 1 s steps.",
-    "Floor offsets outside merged rooms (150 at +0.62 m, the lawn at -0.6 m) are kept in "
-    "venue.json but not used by the fire model, which uses one elevation per storey.",
+    "one smoke layer per room, buoyant door spill, ISO 13571-style untenability: layer below "
+    "2 m or above 200 °C). Flashover at Thomas's Q_fo or an upper layer of 600 °C (Peacock et "
+    "al. 1999), whichever comes first; after it, fire spreads as engine.fire sets out. No "
+    "sprinklers, smoke control or fire service: a worst-case pre-plan.",
+    "Room of origin: untenable once the fire radiates 2.5 kW/m² (ISO 13571) at 3 m, a point "
+    "source with radiative fraction 0.3: about 942 kW, 2:22 into a fast fire. The zone model "
+    "alone keeps a room that vents into a big neighbour tenable much longer.",
+    "Skylight wells: each open_to_below space and the 1F spaces under it are ONE fire room, "
+    "modelled as a box with the true top (the skylights) and the true volume, so its floor area "
+    "is volume / height. 2F well edges are doors of that room at the 2F level.",
+    "Step bands: two indoor spaces joined by a `step` opening (no wall, no door: 140 and 150) "
+    "are one fire room the same way.",
+    "Spaces inside a merged room are judged from their own floor and ceiling (the Galleria far "
+    "end at +0.62 m, 150 at +0.70 m), from the room's layer at 1 s steps.",
+    "Door tops sit at the real header height above the higher floor (150's opening to the "
+    "Galleria tops out at 3.7 m). Outside merged rooms the fire model still uses one elevation "
+    "per storey.",
     "Unprotected interior stairs between two ordinary rooms are stair shafts (open at both "
     "ends); stair 100ST, inside a well, is an open 2F door of the atrium.",
     "Outdoor spaces and SAFE are outside: smoke vents there and they never block.",
-    "Exterior doors are closed for smoke (no venting) but usable for egress.",
+    "Exterior doors are closed for smoke (no venting) but usable for egress. A room of origin "
+    "with no open opening at all gets its doors opened, or the fire would starve.",
     "Elevators: not egress; landing doors closed (60 min); the hoistway carries no smoke.",
-    "Routes: one walker per space, free SFPE walking speed, no queues or pre-movement delay; "
-    "departure time = when people start moving.",
-    "A route must cross each opening before it is blocked and enter each space before it is "
-    "blocked; a space blocked at departure is trapped.",
-    "Routes never enter the room of fire origin from outside it (the zone model keeps it tenable "
-    "until its layer drops, but nobody is sent past the fire); people inside may leave through "
-    "it. --allow-origin-entry turns this off.",
+    "Routes walk door to door at the SFPE free speed (1.20 m/s level, 0.92 m/s along 7/11 "
+    "stairs). A route must cross each opening before it is blocked and enter each space before "
+    "it is blocked; a space blocked at departure is trapped. No pre-movement delay: the "
+    "departure time is when people start moving.",
+    "Each space's occupant_load moves as a group. Openings pass at most 1.3 people/s per metre "
+    "of effective width (1.01 on stairs, SFPE). Aria's plan books door and stair time group by "
+    "group (greedy CCRP) and keeps the best of four candidate plans; reactive groups queue "
+    "first come, first served. People still queued when an opening closes are at risk.",
+    f"Cut-offs and margins under {MARGINAL_S:.0f} s are flagged marginal: inside the models' "
+    "timing error.",
 ]
+
+
+def _core(
+    start: str,
+    growth: str,
+    horizon_s: float,
+    departures: tuple[float, ...],
+    venue_path: str | Path,
+    door_overrides: dict[str, bool] | None,
+    open_origin_doors: bool,
+    origin_limit: bool,
+    avoid_origin: bool,
+) -> tuple:
+    """Fire, per-venue timeline, blocks and the evacuation at each departure time."""
+    if horizon_s <= 0:
+        raise ValueError(f"horizon must be > 0 s, got {horizon_s}")
+    if growth not in ALPHA_KW_S2:
+        raise ValueError(f"unknown growth {growth!r}; use one of {sorted(ALPHA_KW_S2)}")
+    av = load_aria_venue(
+        venue_path,
+        door_overrides=door_overrides,
+        origin_space=start,
+        open_origin_doors=open_origin_doors,
+    )
+    room = av.fire_room(start)
+    # 1 s frames inside (per-space times in merged rooms, the origin limit); thinned for output.
+    tl = simulate(av.fire, room, growth, horizon_s, 1.0, flashover_layer_c=FLASHOVER_LAYER_C)
+    limit_kw = ORIGIN_LIMIT_KW if origin_limit else math.inf
+    vt = venue_timeline(av, tl, origin_space=start, origin_limit_kw=limit_kw)
+    blocks = Blocks.from_venue_timeline(vt, avoid=[start] if avoid_origin else ())
+    deps = evacuate(av.graph, blocks, av.route_sources(), departures)
+    return av, tl, vt, blocks, deps, limit_kw
 
 
 def run_demo(
@@ -70,29 +130,30 @@ def run_demo(
     venue_path: str | Path = VENUE_JSON,
     door_overrides: dict[str, bool] | None = None,
     open_origin_doors: bool = True,
-    avoid_origin: bool = True,
+    origin_limit: bool = True,
+    avoid_origin: bool = False,
+    scan_step_s: float = DEFAULT_SCAN_STEP_S,
+    sensitivity: bool = False,
 ) -> dict:
-    """Run fire + routes for one start space and return the demo JSON as a dict."""
-    av = load_aria_venue(
-        venue_path,
-        door_overrides=door_overrides,
-        origin_space=start,
-        open_origin_doors=open_origin_doors,
-    )
+    """Run fire + routes for one start space and return the demo JSON as a dict.
+    With sensitivity, also rerun with each uncertain open connection closed."""
+    args = (start, growth, horizon_s, departures, venue_path)
+    rules = (open_origin_doors, origin_limit, avoid_origin)
+    av, tl, vt, blocks, deps, limit_kw = _core(*args, door_overrides, *rules)
     room = av.fire_room(start)
-    # 1 s frames inside (exact per-space times for merged rooms); thinned for the output.
-    tl = simulate(av.fire, room, growth, horizon_s, frame_step_s=1.0)
-    vt = venue_timeline(av, tl)
-    blocks = Blocks.from_venue_timeline(vt, avoid=av.spaces_of[room] if avoid_origin else ())
     sources = av.route_sources()
-    departures_out = evacuate(av.graph, blocks, sources, departures)
-    lost = exits_lost(av, vt)
-    events = _events(av, tl, vt, sources)
+    grid = _grid(horizon_s, scan_step_s)
+    scan = _scan(evacuate(av.graph, blocks, sources, grid), scan_step_s)
+    exits_out = {oid: outside for oid, (_, outside) in exit_sides(av).items()}
+    reach = exit_reach(av.graph, blocks, sources, exits_out, grid)
+    lost = exits_lost(av, vt, reach)
+    events = outputs.events(av, tl, vt, lost)
+    frames = outputs.frames(av, tl, vt, start, frame_step_s)
     result = {
         "schema_version": SCHEMA_VERSION,
         "venue_schema_version": av.raw.get("schema_version"),
         "building": av.raw.get("building", {}),
-        "frame": av.raw.get("frame", {}).get("datum"),
+        "frame": av.raw.get("frame", {}),
         "scenario": {
             "start_space": start,
             "fire_room": room,
@@ -100,23 +161,106 @@ def run_demo(
             "horizon_s": horizon_s,
             "departures_s": list(departures),
             "frame_step_s": frame_step_s,
+            "scan_step_s": scan_step_s,
+            "origin_limit": origin_limit,
             "avoid_origin_room": avoid_origin,
         },
         "assumptions": _assumptions(av, open_origin_doors, door_overrides or {}),
         "adapter": _adapter(av),
+        "geometry": outputs.geometry(av),
         "fire": {
+            "criteria": {
+                "flashover_layer_c": FLASHOVER_LAYER_C,
+                "origin_limit_kw": None if math.isinf(limit_kw) else round(limit_kw),
+            },
+            "validity": outputs.validity(tl),
+            "origin": vt["origin"],
             "spaces": vt["spaces"],
             "openings": vt["openings"],
             "exits": lost,
             "events": events,
             "fire_rooms": tl.rooms,
             "fire_doors": tl.doors,
-            "frames": _frames(av, tl, vt, frame_step_s),
         },
-        "routes": {"departures": departures_out},
+        "viewer": outputs.viewer(av, tl, start, growth, frames, events, lost),
+        "routes": {"departures": deps, "scan": scan},
     }
-    result["summary"] = _summary(av, tl, vt, sources, departures_out, lost)
+    result["summary"] = summary.build(av, tl, vt, start, deps, scan, lost)
+    if sensitivity:
+        result["sensitivity"] = _sensitivity(args, rules, door_overrides or {}, deps, lost, av)
     return result
+
+
+def _sensitivity(
+    args: tuple, rules: tuple, overrides: dict[str, bool], deps: list[dict], lost: list, av
+) -> list[dict]:
+    """Each uncertain open connection closed in turn: people at risk per departure time (plan
+    and reactive) and the first exit lost, against the base run."""
+
+    def first_lost(rows: list[dict]) -> float | None:
+        return min((e["lost_s"] for e in rows if e["lost_s"] is not None), default=None)
+
+    def risk(ds: list[dict], mode: str) -> list[int]:
+        return [d["occupants_at_risk"][mode] for d in ds]
+
+    rows = [
+        {
+            "opening": None,
+            "plan_at_risk": risk(deps, "predictive"),
+            "reactive_at_risk": risk(deps, "reactive"),
+            "first_exit_lost_s": first_lost(lost),
+        }
+    ]
+    for oid in summary.uncertain_open(av):
+        if oid in overrides:
+            continue
+        alt_av, _, alt_vt, _, alt_deps, _ = _core(*args, {**overrides, oid: False}, *rules)
+        rows.append(
+            {
+                "opening": oid,
+                "plan_at_risk": risk(alt_deps, "predictive"),
+                "reactive_at_risk": risk(alt_deps, "reactive"),
+                "first_exit_lost_s": first_lost(exits_lost(alt_av, alt_vt)),
+            }
+        )
+    return rows
+
+
+def _grid(horizon_s: float, step_s: float) -> list[float]:
+    step = max(step_s, 1.0)
+    return [i * step for i in range(int(horizon_s // step) + 1)]
+
+
+def _scan(deps: list[dict], step_s: float) -> list[dict]:
+    """People at risk per departure time, plan vs reactive, and who the plan saves.
+    `saved_clear` leaves out the marginal cases (cut-offs or margins under MARGINAL_S)."""
+    rows = []
+    for d in deps:
+        risk = d["occupants_at_risk"]
+        rows.append(
+            {
+                "t0_s": d["t0_s"],
+                "step_s": step_s,
+                "at_risk": risk,
+                "saved": risk["reactive"] - risk["predictive"],
+                "saved_clear": sum(c["saved"] for c in d["contrasts"] if not c["marginal"]),
+                "plan": d["plan"]["chosen"],
+                "contrasts": [_brief(c) for c in d["contrasts"][:6]],
+            }
+        )
+    return rows
+
+
+def _brief(c: dict) -> dict:
+    r, p = c["reactive"], c["predictive"]
+    return {
+        "space": c["space"],
+        "occupants": c["occupants"],
+        "saved": c["saved"],
+        "marginal": c["marginal"],
+        "reactive": {k: r[k] for k in ("status", "at_risk", "exit", "limited_by")},
+        "predictive": {k: p[k] for k in ("status", "at_risk", "exit", "margin_s")},
+    }
 
 
 def _assumptions(av: AriaVenue, open_origin: bool, overrides: dict[str, bool]) -> dict:
@@ -133,13 +277,18 @@ def _assumptions(av: AriaVenue, open_origin: bool, overrides: dict[str, bool]) -
         },
         "door_states": av.door_states,
         "door_overrides": overrides,
-        "origin_doors_opened": open_origin,
+        "sealed_origin_doors_opened": open_origin,
         "walking": {
             "level_m_s": round(WALK_LEVEL_M_S, 3),
             "stair_m_s": round(WALK_STAIR_M_S, 3),
             "ramp_m_s": round(WALK_RAMP_M_S, 3),
             "source": f"SFPE hydraulic model free speed: k(1 - 0.266*0.54), k = {K_LEVEL_M_S} m/s "
             f"level, {K_STAIR_M_S} m/s on 7/11 stairs (along the slope)",
+        },
+        "flow": {
+            "level_p_s_m": FS_LEVEL_P_S_M,
+            "stair_p_s_m": FS_STAIR_P_S_M,
+            "source": "SFPE maximum specific flow per metre of effective width",
         },
     }
 
@@ -155,255 +304,15 @@ def _adapter(av: AriaVenue) -> dict:
         "fire_excluded_openings": av.fire_excluded,
         "route_nodes": len(av.graph.nodes),
         "route_arcs": av.graph.arc_count(),
+        "route_legs": len(av.graph.legs),
         "route_excluded_openings": av.graph.excluded,
+        "estimated_positions": av.graph.estimated_positions,
     }
-
-
-def _venue_ids(av: AriaVenue, fire_id: str) -> list[str]:
-    if av.spaces_of.get(fire_id):
-        return av.spaces_of[fire_id]
-    if fire_id in av.opening_of_door:
-        return [av.opening_of_door[fire_id]]
-    shafts = [oid for oid, rid in av.shaft_of_opening.items() if rid == fire_id]
-    return shafts or [fire_id]
-
-
-def _events(av: AriaVenue, tl: Timeline, vt: dict, sources: list[str]) -> list[dict]:
-    events = [{**e, "venue_ids": _venue_ids(av, e["id"])} for e in tl.events]
-    for sid in sources:
-        info = vt["spaces"][sid]
-        if info["floor_offset_m"] and info["smoke_untenable_s"] is not None:
-            events.append(
-                {
-                    "t_s": info["smoke_untenable_s"],
-                    "type": "untenable",
-                    "id": sid,
-                    "detail": f"{av.label(sid)} untenable (floor {info['floor_offset_m']:+.2f} m "
-                    f"in {info['fire_room']})",
-                    "venue_ids": [sid],
-                }
-            )
-    return sorted(events, key=lambda e: e["t_s"])
-
-
-def _frames(av: AriaVenue, tl: Timeline, vt: dict, step_s: float) -> list[dict]:
-    """Per-space snapshots every step_s (plus the last step), from the 1 s fire frames."""
-    if step_s <= 0 or not tl.frames:
-        return []
-    every = max(1, round(step_s))
-    keep = [f for f in tl.frames if f["t_s"] % every == 0]
-    if keep[-1] is not tl.frames[-1]:
-        keep.append(tl.frames[-1])
-    out = []
-    for f in keep:
-        t = f["t_s"]
-        spaces = {}
-        for sid, rid in av.room_of.items():
-            row, info = f["rooms"][rid], vt["spaces"][sid]
-            state = row["state"]
-            if rid in av.merged and state in ("clear", "smoke", "untenable"):
-                untenable = info["smoke_untenable_s"]
-                if untenable is not None and untenable <= t:
-                    state = "untenable"
-                elif state == "untenable":
-                    state = "smoke"
-            spaces[sid] = {
-                "layer_height_m": round(
-                    max(0.0, row["layer_height_m"] - info["floor_offset_m"]), 2
-                ),
-                "layer_temp_c": row["layer_temp_c"],
-                "hrr_kw": row["hrr_kw"],
-                "state": state,
-            }
-        blocked = [
-            k
-            for group in (vt["spaces"], vt["openings"])
-            for k, v in group.items()
-            if v["blocked_s"] is not None and v["blocked_s"] <= t
-        ]
-        out.append({"t_s": t, "spaces": spaces, "blocked": sorted(blocked)})
-    return out
-
-
-def _first(vt: dict, ids: list[str], key: str) -> dict | None:
-    rows = [(vt["spaces"][s][key], s) for s in ids if vt["spaces"][s][key] is not None]
-    if not rows:
-        return None
-    t, sid = min(rows)
-    return {"t_s": t, "space": sid}
-
-
-def _summary(
-    av: AriaVenue, tl: Timeline, vt: dict, sources: list[str], deps: list[dict], lost: list[dict]
-) -> dict:
-    beyond = [s for s in sources if vt["spaces"][s]["fire_room"] != tl.start_room]
-    flashovers = sorted(
-        (
-            {"t_s": r["flashover_s"], "fire_room": rid, "spaces": _venue_ids(av, rid)}
-            for rid, r in tl.rooms.items()
-            if r["flashover_s"] is not None
-        ),
-        key=lambda x: x["t_s"],
-    )
-    return {
-        "first_smoke_beyond_origin": _first(vt, beyond, "smoke_enters_s"),
-        "first_untenable": _first(vt, sources, "smoke_untenable_s"),
-        "first_untenable_beyond_origin": _first(vt, beyond, "smoke_untenable_s"),
-        "flashovers": flashovers,
-        "merged_member_offsets": [
-            {
-                "space": sid,
-                "offset_m": vt["spaces"][sid]["floor_offset_m"],
-                "untenable_s": vt["spaces"][sid]["smoke_untenable_s"],
-            }
-            for sid in sources
-            if vt["spaces"][sid]["floor_offset_m"]
-        ],
-        "exits_lost": [e for e in lost if e["lost_s"] is not None],
-        "exits_kept": [e["exit"] for e in lost if e["lost_s"] is None],
-        "departures": [
-            {
-                "t0_s": d["t0_s"],
-                "counts": d["counts"],
-                "occupants_at_risk": d["occupants_at_risk"],
-                "trapped": d["trapped"],
-                "trapped_by_origin_only": d["trapped_by_origin_only"],
-                "reactive_fails": [
-                    {
-                        k: f[k]
-                        for k in (
-                            "space",
-                            "occupants",
-                            "opening",
-                            "reach_s",
-                            "blocked_s",
-                            "predictive",
-                            "predictive_exit",
-                            "predictive_eta_s",
-                        )
-                    }
-                    for f in d["reactive_fails"]
-                ],
-                "different_exit": d["different_exit"],
-            }
-            for d in deps
-        ],
-    }
-
-
-def _mmss(t: float | None) -> str:
-    if t is None:
-        return "  -  "
-    t = int(round(t))
-    return f"{t // 60:2d}:{t % 60:02d}"
 
 
 def summary_text(result: dict) -> str:
     """A readable summary of run_demo's result."""
-    s = result["summary"]
-    lines = _header_lines(result)
-    lines += ["", "Fire timeline (m:ss after ignition)", *_timeline_lines(s)]
-    lines += ["", *_evacuation_lines(s)]
-    lines += ["", "Predictive vs reactive (reactive route cut off on the way)", *_contrast_lines(s)]
-    return "\n".join(lines)
-
-
-def _header_lines(result: dict) -> list[str]:
-    sc, adapter = result["scenario"], result["adapter"]
-    lines = [
-        f"Aria engine slice 1: {result['building'].get('name', '')}",
-        f"Fire starts in {sc['start_space']} (fire room {sc['fire_room']}), {sc['growth']} t² "
-        f"growth, {sc['horizon_s']:.0f} s horizon.",
-        f"Model: {adapter['fire_rooms']} fire rooms, {adapter['fire_doors']} fire doors, "
-        f"{len(adapter['stair_shafts'])} stair shafts; {adapter['route_nodes']} route nodes, "
-        f"{adapter['route_arcs']} directed route arcs.",
-    ]
-    for rid, m in adapter["merged_rooms"].items():
-        lines.append(
-            f"Merged {rid}: {', '.join(m['spaces'])} ({m['floor_area_m2']:.0f} m² of floor, "
-            f"{m['volume_m3']:.0f} m³ up to the skylights at {m['top_elevation_m']:.2f} m; "
-            f"modelled as a {m['box_area_m2']:.0f} m² x {m['box_height_m']:.2f} m box)"
-        )
-    return lines
-
-
-def _timeline_lines(s: dict) -> list[str]:
-    lines, timeline = [], []
-    for label, key in (
-        ("first smoke beyond the origin", "first_smoke_beyond_origin"),
-        ("first untenable space", "first_untenable"),
-        ("first untenable beyond the origin", "first_untenable_beyond_origin"),
-    ):
-        row = s[key]
-        if row:
-            timeline.append((row["t_s"], f"{label}: {row['space']}"))
-        else:
-            lines.append(f"     -   {label}: none within the horizon")
-    timeline += [(fo["t_s"], f"flashover: {fo['fire_room']}") for fo in s["flashovers"]]
-    timeline += [
-        (m["untenable_s"], f"untenable: {m['space']} (floor {m['offset_m']:+.2f} m)")
-        for m in s["merged_member_offsets"]
-        if m["untenable_s"] is not None
-    ]
-    timeline += [
-        (e["lost_s"], f"exit lost: {e['exit']} (from {e['from']})") for e in s["exits_lost"]
-    ]
-    lines += [f"  {_mmss(t)}  {text}" for t, text in sorted(timeline, key=lambda x: x[0])]
-    if not s["flashovers"]:
-        lines.append("     -   no flashover within the horizon")
-    lines.append(f"  exits never lost: {', '.join(s['exits_kept']) or 'none'}")
-    return lines
-
-
-def _evacuation_lines(s: dict) -> list[str]:
-    lines = [
-        "Evacuation by departure time (people = occupant_load of spaces not reaching SAFE)",
-        "   t0    predictive ok/trapped (people)      reactive ok/cut off/trapped (people)",
-    ]
-    for d in s["departures"]:
-        p, r = d["counts"]["predictive"], d["counts"]["reactive"]
-        risk = d["occupants_at_risk"]
-        lines.append(
-            f"  {_mmss(d['t0_s'])}  {p['ok']:3d} / {p['trapped']:3d} ({risk['predictive']:4d})"
-            f"                  {r['ok']:3d} / {r['cut_off']:3d} / {r['trapped']:3d} "
-            f"({risk['reactive']:4d})"
-        )
-    lines += [
-        "",
-        "Trapped (no route reaches SAFE even with foresight; * = the only open way out passes "
-        "through the room of fire origin)",
-    ]
-    for d in s["departures"]:
-        origin_only = set(d["trapped_by_origin_only"])
-        trapped = ", ".join(f"{t}*" if t in origin_only else t for t in d["trapped"]) or "none"
-        lines.append(f"  {_mmss(d['t0_s'])}  {trapped}")
-    return lines
-
-
-def _contrast_lines(s: dict) -> list[str]:
-    lines = []
-    for d in s["departures"]:
-        t0 = _mmss(d["t0_s"])
-        for f in d["reactive_fails"]:
-            if f["predictive"] == "ok":
-                pred = (
-                    f"predictive leaves by {f['predictive_exit']}, "
-                    f"safe at {_mmss(f['predictive_eta_s'])}"
-                )
-            else:
-                pred = "predictive: trapped too"
-            lines.append(
-                f"  {t0}  {f['space']} ({f['occupants']} people): reactive reaches "
-                f"{f['opening']} at {_mmss(f['reach_s'])}, closed at "
-                f"{_mmss(f['blocked_s'])}; {pred}"
-            )
-        if d["different_exit"]:
-            diff = ", ".join(
-                f"{x['space']} {x['reactive_exit']} -> {x['predictive_exit']}"
-                for x in d["different_exit"]
-            )
-            lines.append(f"  {t0}  both safe, different exit: {diff}")
-    return lines or ["  no reactive route is cut off at these departure times"]
+    return summary.text(result)
 
 
 def _parse_door(spec: str) -> tuple[str, bool]:
@@ -413,7 +322,7 @@ def _parse_door(spec: str) -> tuple[str, bool]:
     return oid, state == "open"
 
 
-def main(argv: list[str] | None = None) -> int:
+def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m engine.demo", description=__doc__.split("\n")[0])
     p.add_argument("--venue", default=str(VENUE_JSON), help="venue.json path")
     p.add_argument("--start", default=DEFAULT_START, help="indoor space id where the fire starts")
@@ -423,6 +332,9 @@ def main(argv: list[str] | None = None) -> int:
         "--departures", default="0,60,120,180,300", help="comma-separated departure times (s)"
     )
     p.add_argument("--frame-step", type=float, default=30.0, help="s between frames (0: none)")
+    p.add_argument(
+        "--scan-step", type=float, default=DEFAULT_SCAN_STEP_S, help="s between scanned departures"
+    )
     p.add_argument("--out", help="write the JSON to this file")
     p.add_argument("--summary", action="store_true", help="print a readable summary")
     p.add_argument(
@@ -431,23 +343,44 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         type=_parse_door,
         metavar="ID=open|closed",
-        help="override one opening's event-night state (repeatable)",
+        help="override one opening's event-night state for smoke and fire (repeatable); people "
+        "can still walk through a closed door",
     )
     p.add_argument(
         "--keep-origin-doors",
         action="store_true",
-        help="leave the origin room's closed interior doors closed",
+        help="don't open the doors of a room of origin that has no open opening",
     )
     p.add_argument(
-        "--allow-origin-entry",
+        "--no-origin-limit",
         action="store_true",
-        help="let routes pass through the room of fire origin until it is untenable",
+        help="judge the room of origin by the zone model only (no 942 kW radiant limit)",
     )
+    p.add_argument(
+        "--sensitivity",
+        action="store_true",
+        help="also rerun with each uncertain open connection closed (slower)",
+    )
+    p.add_argument(
+        "--avoid-origin",
+        action="store_true",
+        help="never route anyone into the start space, even before the fire grows",
+    )
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = _parser()
     args = p.parse_args(argv)
     try:
         departures = tuple(float(x) for x in args.departures.split(",") if x.strip())
     except ValueError:
         p.error(f"--departures expects numbers, got {args.departures!r}")
+    if args.horizon <= 0:
+        p.error(f"--horizon must be > 0, got {args.horizon}")
+    late = [t for t in departures if t >= args.horizon]
+    if late:
+        print(f"warning: departures at or after the horizon: {late}", file=sys.stderr)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to cp1252
     try:
@@ -460,7 +393,10 @@ def main(argv: list[str] | None = None) -> int:
             venue_path=args.venue,
             door_overrides=dict(args.door),
             open_origin_doors=not args.keep_origin_doors,
-            avoid_origin=not args.allow_origin_entry,
+            origin_limit=not args.no_origin_limit,
+            avoid_origin=args.avoid_origin,
+            scan_step_s=args.scan_step,
+            sensitivity=args.sensitivity,
         )
     except ValueError as err:
         p.error(str(err))

@@ -171,14 +171,22 @@ whatever `Timeline.blocked_at(t)` returns.
 ## Aria venue.json, routes and demo (slice 1)
 
 Slice 1 runs the fire model above on the real venue graph, `venue.json` (schema v0.1, see
-`VENUE.md`), and routes everyone out against the fire timeline. Three modules sit beside the
-fire model and don't change it:
+`VENUE.md`), and routes everyone out against the fire timeline. The modules beside the fire
+model:
 
-- `engine/aria_venue.py`: `venue.json` -> the fire model's `Venue` plus a routing graph, with id
-  maps both ways.
-- `engine/routes.py`: the timeline per venue space and opening id, then predictive and reactive
-  routes.
-- `engine/demo.py`: the CLI that runs it all and writes one JSON.
+- `engine/aria_venue.py`: `venue.json` -> the fire model's `Venue`, with id maps both ways and
+  the event-night door table.
+- `engine/geometry.py`, `engine/route_graph.py`: polygon helpers and the routing graph
+  (door-to-door legs at SFPE walking speeds, door and stair capacities).
+- `engine/routes.py`: the timeline per venue space and opening id, the two extra fire rules, and
+  single-walker predictive and reactive routes; exits lost and exit reach.
+- `engine/evacuate.py`, `engine/flow.py`: whole groups. Aria's capacity-aware plan, and the
+  queue check that counts who doesn't get through a door in time.
+- `engine/demo.py`, `engine/summary.py`, `engine/outputs.py`: the CLI, the readable summary and
+  the JSON's drawing blocks (`geometry`, `viewer`).
+
+One change to `engine/fire.py`: `simulate()` takes an optional `flashover_layer_c` (default
+`None`, which keeps the old behaviour). The demo passes 600 °C. See "Fire rules" below.
 
 ### Run it
 
@@ -186,29 +194,33 @@ fire model and don't change it:
 cd packages/engine
 uv run python -m engine.demo --start 140 --summary            # Collins Room fire (default start)
 uv run python -m engine.demo --start 110 --summary            # Galleria lobby fire
-uv run python -m engine.demo --start 219 --departures 0,60,120,180,240,300,360 --out out.json
-uv run python -m engine.demo --start 140 --door D-110-corridor_core=closed --summary
+uv run python -m engine.demo --start 140 --summary --sensitivity   # each uncertain opening closed
+uv run python -m engine.demo --start 219 --departures 0,60,120 --out out.json
+uv run python -m engine.demo --start 140 --door O-110-140=closed --summary
 uv run pytest -q
 ```
 
 Flags: `--growth` (slow, medium, fast, ultrafast), `--horizon` (s), `--departures` (s, comma
-separated), `--frame-step` (s, 0 for no frames), `--out` (JSON file; without `--out` or
-`--summary` the JSON goes to stdout), `--door ID=open|closed` (repeatable), `--keep-origin-doors`,
-`--allow-origin-entry`, `--venue`. `--start` takes any indoor space id; a well id maps to the
-atrium.
+separated), `--frame-step` (s, 0 for no frames), `--scan-step` (s between scanned departures,
+default 15), `--out` (JSON file; without `--out` or `--summary` the JSON goes to stdout),
+`--door ID=open|closed` (repeatable; smoke and fire only, people can still walk through),
+`--sensitivity`, `--keep-origin-doors`, `--no-origin-limit`, `--avoid-origin`, `--venue`.
+`--start` takes any indoor space id except skylight wells and elevator cars.
+
+A run takes about 1 s (1.5–2 s with `--sensitivity`). The summary ends with the **best demo
+moment**: the departure time, before the first flashover, where Aria's plan saves the most people
+compared with the reactive routes, and the `--departures` value that shows it. It is recomputed
+on every run, so it follows `venue.json` edits. `examples/` holds two full runs and what they
+show.
 
 From Python:
 
 ```python
-from engine.demo import run_demo
+from engine.demo import run_demo, summary_text
 
 result = run_demo(start="140", departures=(0, 60, 120, 180, 300))
+print(summary_text(result))
 ```
-
-Good demo moments: with a Collins Room fire (`--start 140`), departures around 6:00–6:30
-(`--departures 360,375,390`) show predictive routes taking 210_n, 219 and 210A down the NE stair
-while their reactive routes walk into 2F smoke. With a Galleria fire (`--start 110`) at 2:00, the
-2F's reactive routes all head for the terrace and are cut off within seconds.
 
 ### What the adapter assumes
 
@@ -227,19 +239,24 @@ Fuel class by use:
 The Galleria counts as a lobby (circulation fuel) even though it holds sponsor tables during the
 event.
 
-**Skylight wells.** Every `open_to_below` space is merged with the 1F spaces under it (found
-through its floor-void openings) into ONE fire room. Today that is `atrium:110`: 110,
-galleria_far_end and the three wells. The room's volume is the 1F rooms plus each well from the
-1F ceiling up to its top. It is modelled as a box with the true top (the skylights) and that
-volume, so its floor area is volume ÷ height. The 2F openings that face a well become open doors
-of the atrium at the 2F level, at full 2F height, so atrium smoke spills onto the 2F once there's
-any layer, and a 2F fire's smoke spills into the wells. `av.merged` reports what was merged;
-`av.room_of` and `av.spaces_of` map ids both ways.
+**Merged fire rooms.** Two links join spaces into one fire room (one smoke layer):
+- A skylight well (`open_to_below`) and the 1F space its floor void opens onto. Today:
+  `atrium:110` = 110, galleria_far_end and the three wells.
+- A `step` opening between two indoor spaces: a step band with no wall or door. Today:
+  `room:140+150`, the Collins Room (140 and 150 across a 12.7 m band).
 
-**Floor offsets.** The fire model uses one elevation per storey. Inside the merged atrium, a
-member on a different level (the Galleria far end, +0.62 m) is judged untenable from its own
-floor, using the room's layer at 1 s steps. Elsewhere the offsets (150 at +0.62 m, the lawn at
-−0.6 m) stay in `venue.json` but aren't used.
+A merged room is a box with the true top and the true volume, so its floor area is
+volume ÷ height (the atrium: 2540 m³ up to the skylights at 8.0 m). The 2F openings that face a
+well are open doors of the atrium at the 2F level, so atrium smoke spills onto the 2F and 2F
+smoke into the wells. `av.merged` reports what was merged; `av.room_of` and `av.spaces_of` map
+ids both ways.
+
+**Floor offsets.** Spaces inside a merged room are judged from their own floor and ceiling,
+from the room's layer at 1 s steps: the Galleria far end (+0.62 m), 140 (+0.16 m) and 150
+(+0.70 m). Smoke counts as reaching a space only once it is below that space's own ceiling, so
+a thin layer up in a skylight well is not smoke in the lobby. Door tops sit at the real header
+height above the higher floor (150's 9.3 m opening to the Galleria tops out at 3.7 m). The fire
+model still has one floor elevation per storey.
 
 **Event-night door table** (`EVENT_NIGHT_RULES`, the one place door states are set):
 
@@ -255,103 +272,148 @@ floor, using the room's layer at 1 s steps. Elsewhere the offsets (150 at +0.62 
 | Protected interior stair | closed, 60 min | yes |
 | Elevator landing door | closed, 60 min | no |
 
-Not in the fire model: openings inside the merged atrium, openings with no indoor side
+Not in the fire model: openings inside a merged room, openings with no indoor side
 (outdoor-to-outdoor, gates, `SAFE`), and the elevator hoistway. Each excluded opening carries its
 reason in `av.fire_excluded`.
 
 Other rules:
-- **Door heights.** 2.1 m by default. Where a note gives a lintel or header height, that height.
-  Steps, ramps, well edges, open stairs and openings whose notes say "no wall" or "at any
-  height" take the lower of the two rooms' heights.
+- **Door heights.** An explicit `head_height` field wins if `venue.json` ever gets one; then a
+  lintel or header height in the notes; then full height for well edges, open stairs, steps,
+  ramps and leafless openings whose notes say "no wall" or "at any height"; else 2.1 m.
 - **Stairs.** An unprotected stair between two ordinary rooms becomes a stair shaft room (the
   fire model's `kind: "stair"`) with an open door at each end. One touching the atrium (100ST)
   becomes an open 2F door of the atrium.
-- **Room of origin.** Its closed interior doors are opened (`--keep-origin-doors` to skip): worst
-  case for spread, and a fire behind a shut door would starve in this model.
-- **Overrides.** `load_aria_venue(door_overrides={id: bool})` or `--door ID=open|closed`.
+- **A sealed room of origin.** If the room where the fire starts has no open opening at all (170,
+  190, 192), its doors are opened (a door left open, a window broken); otherwise the zone model
+  gives it no air and the fire starves at 0 kW. A room with an open connection keeps its doors as
+  the table sets them. `--keep-origin-doors` turns this off.
+- **Overrides.** `load_aria_venue(door_overrides={id: bool})` or `--door ID=open|closed`. An id
+  with no fire-model door (an outdoor gate, ST-W) is an error.
 - **Outdoor spaces and `SAFE`** are the fire model's `outside`: smoke vents there and they never
   block.
 
-**Routing graph.** Nodes are every space plus `SAFE`. Edges are the openings people can use
-(not elevators, `effective_width > 0`), both ways; nobody walks back in from `SAFE`. Each edge
-runs from a point inside the first space's polygon (its centroid, or the middle of the widest run
-for L shapes), to the opening's position, to a point inside the next space. Walking speeds come
-from the SFPE hydraulic model at the free speed, k·(1 − 0.266·0.54):
+### Fire rules on top of the zone model
 
-| Where | k (m/s) | Speed (m/s) |
-|---|---|---|
-| Level | 1.40 | 1.20 |
-| Stair (7/11, along the slope) | 1.08 | 0.92 |
-| Ramp | ASSUMPTION: as level | 1.20 |
+- **Flashover at 600 °C.** A room also flashes over when its upper layer reaches 600 °C (Peacock
+  et al. 1999, the usual zone-model criterion), not only at Thomas's Q_fo. Thomas counts every
+  open interior opening as a vent, so a room opening into a big neighbour (the Collins Room into
+  the atrium) never reached Q_fo while its layer sat at 1000 °C. After flashover the fire spreads
+  as `engine.fire` sets out. Frames after the first flashover carry `beyond_screening: true`.
+- **Room of origin.** The space where the fire starts is untenable once the fire radiates
+  2.5 kW/m² (ISO 13571) at 3 m: a point source with radiative fraction 0.3 gives 942 kW, 2:22 into
+  a fast fire. The zone model alone kept 140 tenable to 8:15 because its smoke drained into the
+  atrium. `--no-origin-limit` turns this off.
 
-A stair or step run uses `length`, or `rise` ÷ 0.178 × 0.279 when there is no length. Edges carry
-`effective_width` for the crowd slice.
+### Routing graph
 
-### Routes
+Nodes are every space plus `SAFE`. Edges are the openings people can use (not elevators,
+`effective_width > 0`), both ways, except that nobody walks back in from `SAFE` or from outdoors
+into the building. A route starts at a point inside its space's polygon (the centroid, or the
+middle of the widest run for L shapes), then walks door to door: straight from the opening it
+came in by to the one it leaves by, or via the space's point when the straight line would leave
+the polygon. An opening with no position sits midway between its two spaces
+(`adapter.estimated_positions`). Walking speeds are the SFPE free speed, k·(1 − 0.266·0.54):
 
-The fire model's room and door `blocked_s` are mapped back to venue ids:
-- A space takes its fire room's time.
-- An opening takes the earliest of its fire doors, its stair shaft and both its spaces.
+| Where | k (m/s) | Speed (m/s) | Max flow (people/s per m of effective width) |
+|---|---|---|---|
+| Level, doors | 1.40 | 1.20 | 1.3 |
+| Stair (7/11, along the slope) | 1.08 | 0.92 | 1.01 |
+| Ramp | ASSUMPTION: as level | 1.20 | 1.3 |
+
+A stair or step run uses `length`, or `rise` ÷ 0.178 × 0.279 when there is no length.
+
+### Routes and evacuation
+
+Blocked times per venue id:
+- A space: its fire room's untenable, flashover or fire-arrival time, judged on its own floor in
+  merged rooms, and the origin limit for the start space.
+- An opening: the earliest of its spaces' times, its stair shaft and fire passing its doors.
 - Outdoor spaces and `SAFE` never block.
 
-Then, for every indoor space except wells and elevator cars, and each departure time t0:
-- **predictive**: earliest-arrival time-dependent Dijkstra (`heapq`). The label is the arrival
-  time. An opening is usable only if it is reached before its `blocked_s`, and a space can't be
+Single walker, per space and departure time t0:
+- **predictive**: earliest-arrival time-dependent Dijkstra over (space, opening came in by)
+  states. An opening is usable only if it is crossed before its `blocked_s`, and a space can't be
   entered at or after its `blocked_s`. Times are fixed and every constraint is a deadline (FIFO),
   so the search is exact.
 - **reactive**: the shortest route over what is open at t0, walked in time. `cut_off` records
   where and when it fails.
-- **Room of fire origin.** Routes never enter it from outside, because the zone model keeps it
-  tenable until its layer drops and a pre-plan doesn't send people past the fire. People already
-  inside may leave through it. `--allow-origin-entry` turns this off. A trapped space whose only
-  open way out is through that room is marked with `*` and the reason "every open route passes
-  through the room of fire origin".
-- **Trapped.** A space already blocked at t0 is trapped (untenable at departure).
+- A space already blocked at t0 is untenable at departure. A trapped space whose only way out,
+  even with no fire, is through the room of origin gets the reason "the only way out passes
+  through the room of fire origin" (`*` in the summary).
 
-### Output (`schema_version: aria-engine-demo/1`)
+Whole groups (`engine.evacuate`), per departure time:
+- Each space's `occupant_load` moves as a group.
+- **Reactive**: each group takes its reactive route; groups queue first come, first served.
+- **Aria's plan** (the `predictive` mode in the output): groups take turns booking door and
+  stair time. Each takes the earliest route that gets the whole group through before anything on
+  it closes, following the last person along the route, and keeps out of the room of origin when
+  there's a way round (a greedy capacity-constrained route planner, CCRP: Lu, George & Shekhar
+  2005). Four candidates are tried (most urgent space first, nearest group first, everyone on
+  the single-walker route, the reactive routes where they work) and the one leaving the fewest
+  people at risk is kept (`plan.chosen`, `plan.at_risk`).
+- **Queue check** (`engine.flow`): each opening passes at most Fs × We people per second. People
+  still queued when an opening closes are at risk; a group with some at risk is `partial`.
+- Cut-offs and margins under 10 s are flagged `marginal`: inside the models' timing error.
+
+Exits: `lost_s` is when the opening itself is blocked; `reachable_until_s` is the last scanned
+departure time at which any occupied space can still get out through it (an exit nobody can
+reach is lost too, e.g. ST-W, whose own stair never burns), and `kept_by` lists the spaces that
+can still reach it at the horizon.
+
+### Output (`schema_version: aria-engine-demo/2`)
 
 | Key | What |
 |---|---|
-| `building`, `frame`, `scenario` | From `venue.json`; start space, fire room, growth, horizon, departures, frame step |
-| `assumptions` | The notes, the event-night table, every opening's state (`door_states`: category, open, rating, why, `changed_by`), overrides, walking speeds |
-| `adapter` | `merged_rooms`, `space_to_fire_room`, `opening_to_fire_doors`, `stair_shafts`, `fire_excluded_openings`, `route_excluded_openings`, counts |
-| `fire.spaces[id]` | `fire_room`, `floor_offset_m`, `smoke_enters_s`, `smoke_untenable_s`, `ignition_s`, `flashover_s`, `blocked_s` |
+| `building`, `frame`, `scenario` | From `venue.json` (the whole `frame`, with its scan transforms); start space, fire room, growth, horizon, departures, frame and scan steps, rule switches |
+| `assumptions` | The notes, the event-night table, every opening's state (`door_states`: category, open, rating, why, `changed_by`), overrides, walking speeds and flows |
+| `adapter` | `merged_rooms`, `space_to_fire_room`, `opening_to_fire_doors`, `stair_shafts`, `fire_excluded_openings`, `route_excluded_openings`, `estimated_positions`, counts |
+| `geometry` | `storeys`, and per space and opening what drawing needs (polygon, storey, floor elevation, height, position, widths, `is_exit`), copied from `venue.json` |
+| `fire.criteria`, `fire.validity`, `fire.origin` | The flashover temperature and origin limit; the first flashover (after it the numbers are indicative); the origin limit's time and the zone model's own time |
+| `fire.spaces[id]` | `fire_room`, `floor_offset_m`, `smoke_enters_s`, `smoke_untenable_s`, `untenable_by` (`smoke_layer` or `heat`), `ignition_s`, `flashover_s`, `blocked_s` (and `origin_limit_s` on the start space) |
 | `fire.openings[id]` | `category`, `open`, `fire_doors`, `shaft`, `burn_through_s`, `fire_passes_s`, `blocked_s` |
-| `fire.exits` | Each `is_exit` opening and `lost_s` (`null`: never lost) |
-| `fire.events` | The fire model's events, with `venue_ids` added |
-| `fire.frames` | Every `frame_step_s`: per space `layer_height_m` (above that space's own floor), `layer_temp_c`, `hrr_kw` (the fire room's; members of a merged room share it) and `state`, plus the venue ids `blocked` at that time |
+| `fire.exits` | Each `is_exit` opening: `lost_s`, `reachable_until_s`, `kept_by`, `reachable_counts` per scanned departure |
+| `fire.events` | Venue-level events: ignition, flashover, burn-through, burnout from the fire model; smoke, untenable and exit lost per venue id |
 | `fire.fire_rooms`, `fire.fire_doors` | The raw fire timeline, in fire-model ids |
-| `routes.departures[]` | Per t0: `counts` and `occupants_at_risk` per mode, `trapped`, `trapped_by_origin_only`, `reactive_fails`, `different_exit`, and `spaces[id].predictive` / `.reactive` |
-| `summary` | First smoke, first untenable, flashovers, exits lost and kept, per-departure headlines |
+| `viewer` | A `FireTimeline` (`apps/web/lib/scan-fire.ts`) keyed by venue ids: `rooms` (polygon bounding boxes, storey, ceiling), `doors` (every opening's position), `exits`, `events` and `frames` (per space: `layer_height_m` above its own floor, `layer_temp_c`, `hrr_kw`, `state`; plus `blocked` and `beyond_screening`). `scan.floor_y` is −3.91: the venue frame is room 2's scan frame, and the four-room GLB is in it |
+| `routes.departures[]` | Per t0: `plan`, `counts` and `occupants_at_risk` per mode, `untenable_at_departure`, `trapped`, `trapped_by_origin_only`, `partial`, `reactive_cut_off`, `contrasts` (where the plan beats the reactive routes), `flow` per opening, and `spaces[id].predictive` / `.reactive` |
+| `routes.scan[]` | Every `scan_step_s`: people at risk per mode, people saved (`saved_clear` leaves out marginal cases), the chosen plan, the top contrasts |
+| `summary` | First smoke and untenable beyond the origin, flashovers, exits lost and their reach, ways down per storey, uncertain open connections, per-departure headlines, the scan, `best_moment` |
+| `sensitivity` | With `--sensitivity`: people at risk per departure and the first exit lost, as modelled and with each uncertain open connection closed |
 
-A route has:
-- `status`: `ok`, `cut_off` or `trapped`.
-- `reason`, if trapped.
+A route (`spaces[id].predictive` or `.reactive`) has:
+- `status`: `ok`, `partial`, `cut_off` or `trapped`; `at_risk` (people); `reason` if trapped.
 - `exit`: the `is_exit` opening it uses; failing that, the first door outdoors.
-- `path`: space, opening, space, …, `SAFE`.
+- `path`: space, opening, space, …, `SAFE`; `crossings`: `[opening, t]` for the first walker.
 - `points`: `[x, z, elevation]` in the venue frame, for drawing on the scan.
-- `distance_m`.
-- `depart_s`, `exit_s`, `eta_s` (reaches `SAFE`) and `travel_s`.
-- `cut_off`: `{opening, into, reach_s, blocked_s}`. For a cut-off route, `eta_s` is what it would
-  have been.
+- `distance_m`, `depart_s`, `exit_s`, `eta_s` (reaches `SAFE`), `travel_s`, `margin_s`,
+  `marginal`. A cut-off route has `eta_s: null`, `planned_eta_s` and
+  `cut_off: {opening, into, reach_s, blocked_s, late_by_s}`.
+- `flow`: `people`, `cleared`, `at_risk`, `last_out_s` (the last person reaches `SAFE`),
+  `bottleneck`, `limited_by`.
 
-Times are seconds after ignition. A 900 s run takes about 0.5 s.
+Times are seconds after ignition.
 
 ### Limits (slice 1)
 
 - **Fire model.** Everything in "Assumptions and limits" above still applies. On top of that:
-  - The atrium box is a screening approximation. Its layer height is exact in volume but not in
-    shape (about ±20% on when smoke reaches a given height).
+  - The merged-room box is a screening approximation: right in volume and top, not in shape
+    (about ±20% on when smoke reaches a given height).
+  - Outside merged rooms there is one floor elevation per storey.
   - Windows aren't in `venue.json`, so no room has window vents.
-  - The ANN-corridor doors may be magnetic hold-opens that close on alarm, and the Founders'
-    opening may be an operable wall. Both are modelled open; use `--door` to test them closed.
-- **Routes.**
-  - One walker per space: no crowd density, door queues, merging flows or pre-movement time.
-    `effective_width` is carried for that next slice.
+  - The 2F rooms around the wells go "untenable" when a cool layer drops below 2 m (labelled
+    `smoke_layer`, "smoke-logged"): conservative, since there is no visibility or FED model yet.
+  - After the first flashover, layer temperatures, HRR (up to the fuel limit, ~130 MW for the
+    Collins Room) and spread are indicative only.
+  - The ANN-corridor doors may be magnetic hold-opens, the Founders' opening an operable wall and
+    the Collins–Galleria openings partly glazed. All are modelled open; the summary lists them
+    and `--sensitivity` closes each in turn.
+- **People.**
+  - No pre-movement time: t0 is when people start moving.
+  - A group takes one route; splitting a room across exits, merging-flow priority and slowing in
+    dense rooms or smoke are not modelled. The plan is greedy, not optimal.
   - Reactive routes don't re-plan after a cut-off.
-  - Untenability is a hard switch: no FED dose and no slower walking in smoke.
 - **Data.** `venue.json` is still being edited. Most widths and all 2F/3F heights are
   placeholders, several links are `INFERRED`, and the 130 back-of-house cluster's only drawn way
-  out is through 140. The adapter reads whatever is there. Its tests check the invariants (every
-  opening mapped or excluded with a reason, the merged atrium, `SAFE` reachable from every indoor
-  space when nothing burns), not exact counts.
+  out is through 140. The adapter reads whatever is there. The tests check invariants (every
+  opening mapped or excluded with a reason, merged rooms, door rules, the fire rules, `SAFE`
+  reachable when nothing burns, queues on a toy graph), not exact counts.

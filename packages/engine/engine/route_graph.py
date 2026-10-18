@@ -197,11 +197,15 @@ def _node(d: _Data, sid: str) -> Node:
 def _legs(d: _Data, nodes: dict[str, Node], arcs: dict[str, list[Arc]]) -> dict:
     """Door-to-door walks across every space, for each pair of its walkable openings."""
     legs = {}
-    for sid, out in arcs.items():
+    touching: dict[str, dict[str, Arc]] = {sid: {} for sid in nodes}
+    for out in arcs.values():
+        for a in out:  # position and run don't depend on direction
+            touching[a.frm].setdefault(a.opening, a)
+            touching[a.to].setdefault(a.opening, a)
+    for sid, by_opening in touching.items():
         if sid == SAFE:
             continue
         node, poly = nodes[sid], d.polygon(sid)
-        by_opening = {a.opening: a for a in out}
         for a_in in by_opening.values():
             for a_out in by_opening.values():
                 if a_in.opening == a_out.opening:
@@ -237,8 +241,10 @@ def build_route_graph(d: _Data, states: dict[str, dict]) -> RouteGraph:
             pos = (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
             estimated[oid] = "no position in venue.json: midway between its two spaces"
         for frm, to in ((o["a"], o["b"]), (o["b"], o["a"])):
-            if frm != SAFE:  # nobody walks back in from the public way
-                arcs[frm].append(_arc(nodes, o, pos, frm, to))
+            # Nobody walks back in from the public way, or from outdoors into the building.
+            if frm == SAFE or (nodes[frm].is_outdoor and not nodes[to].is_outdoor):
+                continue
+            arcs[frm].append(_arc(nodes, o, pos, frm, to))
     return RouteGraph(
         nodes=nodes,
         arcs=arcs,

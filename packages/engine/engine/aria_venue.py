@@ -546,6 +546,10 @@ class AriaVenue:
             raise ValueError(f"{space_id!r} is not an indoor space. Indoor ids: {indoor}")
         return self.room_of[space_id]
 
+    def floor(self, space_id: str) -> int:
+        """Storey number of a space (1F -> 1)."""
+        return self._data.floor(space_id)
+
     def height(self, space_id: str) -> float:
         """Floor-to-ceiling height of a space (3.0 m when venue.json has none)."""
         return self._data.height(space_id)
@@ -620,6 +624,10 @@ def load_aria_venue(
             )
         origin_room = room_of[origin_space]
     states = _door_states(d, room_of, origin_room, open_origin_doors, overrides)
+    no_door = sorted(o for o in overrides if states[o]["category"] not in EVENT_NIGHT_RULES)
+    if no_door:
+        why = "; ".join(f"{o}: {NOT_A_FIRE_DOOR[states[o]['category']]}" for o in no_door)
+        raise ValueError(f"door overrides name openings with no fire-model door ({why})")
 
     doors: dict[str, Door] = {}
     doors_of_opening: dict[str, list[str]] = {}

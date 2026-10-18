@@ -11,7 +11,8 @@ Two ways to pick a route from a space at departure time t0:
   off), then walked in time. If something on it closes before they reach it, it is cut off.
 
 The gap between the two is the headline: where the obvious route walks into smoke. Both are
-one walker per space; engine.flow then checks whether everyone behind that walker gets through.
+one walker per space; engine.evacuate moves whole groups (door and stair capacity) and
+engine.flow checks whether everyone behind the first walker gets through.
 
 Blocked times come from engine.fire's Timeline, mapped back to venue ids by venue_timeline(),
 with two rules on top of the zone model: flashover also at a 600 °C upper layer, and the room of
@@ -28,9 +29,12 @@ from dataclasses import dataclass, field
 
 from engine import physics
 from engine.aria_venue import AriaVenue
-from engine.constants import SMOKE_PRESENT_DEPTH_M, TENABLE_LAYER_HEIGHT_M
+from engine.constants import (
+    SMOKE_PRESENT_DEPTH_M,
+    TENABLE_LAYER_HEIGHT_M,
+    TENABLE_LAYER_TEMP_K,
+)
 from engine.fire import Timeline
-from engine.flow import queue_check
 from engine.route_graph import SAFE, Arc, RouteGraph
 
 INF = math.inf
@@ -80,16 +84,23 @@ def _member_times(
             enters = f["t_s"]
         if untenable is None and physics.is_untenable(h, row["layer_temp_c"] + 273.15, depth):
             untenable = f["t_s"]
-            by = "smoke_layer" if h < TENABLE_LAYER_HEIGHT_M else "heat"
+            by = _by(h, row["layer_temp_c"])
             break
     return enters, untenable, by
+
+
+def _by(layer_height_m: float, layer_temp_c: float) -> str:
+    """Which untenability limit tripped. Frames are rounded, so judge by temperature: a layer
+    under 200 °C can only have tripped the 2 m smoke limit."""
+    hot = layer_temp_c + 273.15 >= TENABLE_LAYER_TEMP_K
+    return "heat" if hot and layer_height_m >= TENABLE_LAYER_HEIGHT_M else "smoke_layer"
 
 
 def _untenable_by(tl: Timeline, room_id: str, t_s: int | None) -> str | None:
     if t_s is None or t_s >= len(tl.frames):
         return None
-    h = tl.frames[t_s]["rooms"][room_id]["layer_height_m"]
-    return "smoke_layer" if h < TENABLE_LAYER_HEIGHT_M else "heat"
+    row = tl.frames[t_s]["rooms"][room_id]
+    return _by(row["layer_height_m"], row["layer_temp_c"])
 
 
 def _origin_limit_s(tl: Timeline, room_id: str, limit_kw: float) -> int | None:
@@ -275,16 +286,24 @@ class Route:
 
 
 Usable = Callable[[Arc, float], bool]
+Hold = Callable[[Arc, float], float]  # first walker reaches an opening -> starts through it
 _State = tuple[str, str | None]  # (space, opening came in by; None at the start)
 
 
 def _search_all(
-    graph: RouteGraph, source: str, t0: float, usable: Usable, stop_at_safe: bool = True
+    graph: RouteGraph,
+    source: str,
+    t0: float,
+    usable: Usable,
+    stop_at_safe: bool = True,
+    hold: Hold | None = None,
 ) -> tuple[dict[_State, float], dict[_State, tuple[_State, Arc]], _State | None]:
     """Earliest-arrival Dijkstra over (space, entry opening) states from source at t0.
 
     Returns the labels, the back-pointers and the first SAFE state popped (None: SAFE not
-    reached). With stop_at_safe=False it labels every reachable state.
+    reached). With stop_at_safe=False it labels every reachable state. `hold` delays the walker
+    at an opening (a queue booked ahead of it); it must not decrease with arrival time, which
+    keeps the search FIFO and exact.
     """
     start: _State = (source, None)
     best: dict[_State, float] = {start: t0}
@@ -307,7 +326,7 @@ def _search_all(
             if via is not None and arc.opening == via.opening:
                 continue  # no turning back through the door just used
             dt, _, _ = graph.step(via, arc)
-            t_cross = t + dt
+            t_cross = t + dt if hold is None else hold(arc, t + dt)
             if not usable(arc, t_cross):
                 continue
             t_next = t_cross + (arc.t_out_s if arc.to == SAFE else 0.0)
@@ -334,7 +353,13 @@ def _search(graph: RouteGraph, source: str, t0: float, usable: Usable) -> list[A
 
 
 def _walk(
-    graph: RouteGraph, source: str, t0: float, mode: str, arcs: list[Arc], blocks: Blocks
+    graph: RouteGraph,
+    source: str,
+    t0: float,
+    mode: str,
+    arcs: list[Arc],
+    blocks: Blocks,
+    hold: Hold | None = None,
 ) -> Route:
     """Walk the arcs from t0; record the path, polyline, crossing times, margin and cut-off."""
     node = graph.nodes[source]
@@ -345,7 +370,7 @@ def _walk(
     prev = None
     for arc in arcs:
         dt, dd, bend = graph.step(prev, arc)
-        t_cross = t + dt
+        t_cross = t + dt if hold is None else hold(arc, t + dt)
         closes = blocks.closes(arc)
         margin = min(margin, closes - t_cross)
         if cut is None and t_cross >= closes:
@@ -433,104 +458,11 @@ def reactive_route(graph: RouteGraph, blocks: Blocks, source: str, t0: float) ->
     return _walk(graph, source, t0, "reactive", arcs, blocks)
 
 
-# --- Whole-building evacuation per departure time. ---
-def evacuate(
-    graph: RouteGraph, blocks: Blocks, sources: Iterable[str], departures: Iterable[float]
-) -> list[dict]:
-    """Predictive and reactive routes for every source at every departure time, each checked
-    for door and stair capacity (engine.flow)."""
-    sources = list(sources)
-    return [_departure(graph, blocks, sources, float(t0)) for t0 in departures]
-
-
-def _status(route: Route, flow: dict | None) -> str:
-    if route.ok and flow and flow["at_risk"] > 0:
-        return "partial"
-    return route.status
-
-
-def _departure(graph: RouteGraph, blocks: Blocks, sources: list[str], t0: float) -> dict:
-    load = {sid: graph.nodes[sid].occupant_load for sid in sources}
-    pred = {sid: predictive_route(graph, blocks, sid, t0) for sid in sources}
-    react = {sid: reactive_route(graph, blocks, sid, t0) for sid in sources}
-    flow = {
-        "predictive": queue_check(blocks, pred, load),
-        "reactive": queue_check(blocks, react, load),
-    }
-    counts = {m: {"ok": 0, "partial": 0, "cut_off": 0, "trapped": 0} for m in flow}
-    at_risk = {"predictive": 0, "reactive": 0}
-    for mode, routes in (("predictive", pred), ("reactive", react)):
-        for sid, route in routes.items():
-            f = flow[mode]["spaces"].get(sid)
-            status = _status(route, f)
-            counts[mode][status] += 1
-            at_risk[mode] += f["at_risk"] if status == "partial" else (0 if route.ok else load[sid])
-    reactive_fails, different_exit = [], []
-    for sid in sources:
-        p, r = pred[sid], react[sid]
-        if r.status == "cut_off":
-            reactive_fails.append(_fail_row(sid, load[sid], p, r, flow["predictive"]))
-        elif p.ok and r.ok and p.exit != r.exit:
-            different_exit.append(
-                {"space": sid, "predictive_exit": p.exit, "reactive_exit": r.exit}
-            )
-    no_route = [s for s in sources if pred[s].status == "trapped"]
-    return {
-        "t0_s": t0,
-        "counts": counts,
-        "occupants_at_risk": at_risk,
-        "untenable_at_departure": sorted(
-            s for s in no_route if pred[s].reason == "untenable at departure"
-        ),
-        "trapped": sorted(s for s in no_route if pred[s].reason != "untenable at departure"),
-        "trapped_by_origin_only": sorted(s for s in no_route if pred[s].reason == ORIGIN_ONLY),
-        "partial": {
-            mode: sorted(
-                s
-                for s in sources
-                if _status((pred if mode == "predictive" else react)[s], f["spaces"].get(s))
-                == "partial"
-            )
-            for mode, f in flow.items()
-        },
-        "reactive_fails": reactive_fails,
-        "different_exit": different_exit,
-        "flow": {mode: f["openings"] for mode, f in flow.items()},
-        "spaces": {
-            sid: {
-                "occupants": load[sid],
-                "predictive": {
-                    **pred[sid].to_dict(),
-                    "flow": flow["predictive"]["spaces"].get(sid),
-                },
-                "reactive": {**react[sid].to_dict(), "flow": flow["reactive"]["spaces"].get(sid)},
-            }
-            for sid in sources
-        },
-    }
-
-
-def _fail_row(sid: str, people: int, p: Route, r: Route, pflow: dict) -> dict:
-    f = pflow["spaces"].get(sid) or {}
-    return {
-        "space": sid,
-        "occupants": people,
-        "reactive_exit": r.exit,
-        **r.to_dict()["cut_off"],
-        "marginal": r.cut_off["late_by_s"] < MARGINAL_S,
-        "predictive": _status(p, f or None),
-        "predictive_exit": p.exit,
-        "predictive_eta_s": None if p.eta_s is None else round(p.eta_s, 1),
-        "predictive_margin_s": None if p.margin_s is None else round(p.margin_s, 1),
-        "predictive_marginal": p.marginal,
-        "predictive_at_risk": f.get("at_risk", 0 if p.ok else people),
-    }
-
-
 # --- Exits: when each is lost, and from where it can still be reached. ---
 def _reachable_exits(
-    graph: RouteGraph, blocks: Blocks, source: str, t0: float, exits: set[str]
+    graph: RouteGraph, blocks: Blocks, source: str, t0: float, exits: dict[str, str]
 ) -> set[str]:
+    """Exits a walker leaving `source` at t0 can cross outward (into exits[e]) in time."""
     if blocks.space(source) <= t0:
         return set()
 
@@ -538,16 +470,21 @@ def _reachable_exits(
         return t_cross < blocks.closes(arc) and blocks.may_enter(arc)
 
     best, _, _ = _search_all(graph, source, t0, usable, stop_at_safe=False)
-    return {opening for (_, opening) in best if opening in exits}
+    return {e for e, outside in exits.items() if (outside, e) in best}
 
 
 def exit_reach(
-    graph: RouteGraph, blocks: Blocks, sources: Iterable[str], exits: list[str], grid: list[float]
+    graph: RouteGraph,
+    blocks: Blocks,
+    sources: Iterable[str],
+    exits: dict[str, str],
+    grid: list[float],
 ) -> dict[str, dict]:
-    """For each exit and each occupied source: the last departure time on `grid` at which a
-    walker leaving then can still cross that exit before anything on the way closes."""
+    """For each exit (id -> the space it leads out to) and each occupied source: the last
+    departure time on `grid` at which a walker leaving then can still cross that exit,
+    outward, before anything on the way closes."""
     occupied = [s for s in sources if graph.nodes[s].occupant_load > 0]
-    wanted = set(exits)
+    wanted = exits
     last: dict[str, dict[str, float]] = {e: {} for e in exits}
     count: dict[str, list[int]] = {e: [] for e in exits}
     for t0 in grid:
@@ -571,15 +508,22 @@ def exit_reach(
     return out
 
 
+def exit_sides(av: AriaVenue) -> dict[str, tuple[str, str]]:
+    """Each is_exit opening -> (inside, outside). An exit between two outdoor spaces (the west
+    exterior stair) is listed from its upper side, `a` (VENUE.md)."""
+    sides = {}
+    for oid, o in av.openings.items():
+        if o.get("is_exit"):
+            a, b = o.get("a"), o.get("b")
+            sides[oid] = (b, a) if b in av.room_of and a not in av.room_of else (a, b)
+    return sides
+
+
 def exits_lost(av: AriaVenue, vt: dict, reach: dict[str, dict] | None = None) -> list[dict]:
     """Each building exit: when the fire takes the opening itself (None: never within the
     horizon) and, with `reach`, until when occupied spaces can still get to it."""
     rows = []
-    for oid, o in av.openings.items():
-        if not o.get("is_exit"):
-            continue
-        a, b = o.get("a"), o.get("b")
-        inside, outside = (b, a) if b in av.room_of and a not in av.room_of else (a, b)
+    for oid, (inside, outside) in exit_sides(av).items():
         row = {
             "exit": oid,
             "from": inside,
