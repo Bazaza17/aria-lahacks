@@ -32,7 +32,7 @@ from urllib.parse import quote
 
 import httpx
 
-from app.creao import agents, hub
+from app.creao import agents, hub, plan
 from app.creao.buildings import get_building
 from app.creao.config import get_settings
 from app.creao.db import sessions
@@ -82,6 +82,7 @@ ACTION_TOOLS = (
     "complete_task",
 )
 MAX_ACTIONS = 12
+WHEN_IDLE = ("update_report", "add_note", "complete_task")  # all a reply may do once it has ended
 _BLOCK = re.compile(r"```aria-actions\s*(.*?)```", re.DOTALL)
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(\[\s*\{.*?\}\s*\])\s*```", re.DOTALL)
 
@@ -117,6 +118,12 @@ async def apply_actions(run: AgentRun, body: dict) -> list[dict]:
 
     actions = parse_actions(body)[:MAX_ACTIONS]
     actions.sort(key=lambda a: a.get("tool") == "complete_task")
+    # A reply that lands after the evacuation ended only writes (reports, notes): it must not put
+    # hazards, calls, handoffs or new tasks back on a console that ending just cleared.
+    idle = False
+    if building_id := getattr(run, "building_id", None):
+        async with sessions()() as session:
+            idle = await plan.active_evacuation(session, building_id) is None
     done = []
     for action in actions:
         name, args = action.get("tool"), action.get("args") or {}
@@ -125,6 +132,9 @@ async def apply_actions(run: AgentRun, body: dict) -> list[dict]:
             continue
         if name == "handoff_to_agent" and run.role != "commander":
             done.append({"tool": name, "error": "only the Commander hands off"})
+            continue
+        if idle and name not in WHEN_IDLE:
+            done.append({"tool": name, "error": "the evacuation has ended"})
             continue
         fn = getattr(mcp, name)
         accepted = set(inspect.signature(fn).parameters) - {"run_id"}
