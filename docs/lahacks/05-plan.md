@@ -2,7 +2,7 @@
 
 > A starting point to plan with Claude Code. It's built from `01-decisions.md`. Decided items are marked; the rest is open.
 >
-> **Status Sun Oct 18, ~11 AM.** Phases 0–5 and 7–8 are built. Phase 6 became the CREAO command staff (six CREAO agents run the live response; `docs/creao-layer.md`), not ASI:One agents: Fetch.ai is dropped. What's left is phase 9, the submission: see "Submission checklist" below, `15-devpost.md` and `16-demo-script.md`.
+> **Status Sun Oct 18, ~11 AM.** Phases 0–5 and 7–8 are built. Phase 6 became the CREAO command staff (six CREAO agents run the live response; `docs/creao-layer.md`), not ASI:One agents: Fetch.ai is dropped. What's left is phase 9, the submission: see "Submission checklist" below, and `15-devpost.md`.
 
 ## The goal
 
@@ -25,7 +25,7 @@ The order matters more than the times. Decided: engine first, so phases 2–5 co
 
 ## Submission checklist (Sun Oct 18, due 12:00 PM)
 
-Drafts: `15-devpost.md` (Devpost text) and `16-demo-script.md` (video script). **Never declare or end a drill on the live console unless a person is running the recording: it texts and calls real phones.**
+Draft: `15-devpost.md` (Devpost text). **Never declare or end a drill on the live console unless a person is running the recording: it texts and calls real phones.**
 
 General:
 
@@ -34,7 +34,7 @@ General:
 - [x] License: MIT (`LICENSE`).
 - [ ] README: what it is, how to run, live links, screenshots, team, built at the event, the CREAO section (`README.md`).
 - [ ] Devpost page from `15-devpost.md`, saying which features were built at the event; opt into each prize entered.
-- [ ] Demo video, 2–3 minutes, from `16-demo-script.md`.
+- [ ] Demo video, 2–3 minutes.
 - [ ] Don't commit `apps/api/creao_live.db` (local SQLite; may hold phone numbers).
 - [ ] Judging 12:30 PM, Collins Conference Room, in person.
 
@@ -42,7 +42,7 @@ CREAO (entered):
 
 - [x] **01 Build the agent on agent.creao.ai.** Six agents, built and running (`docs/creao-layer.md`, "Agent links").
 - [ ] **02 README: agent ID + run share link.** Commander agent ID `ef349685-a692-4a0d-ae20-eb2e1f524624`. The share link comes from the CREAO app (the owner clicks Share on a run); until then the docs carry the placeholder `CREAO_RUN_SHARE_LINK`. Check that the ID on the agent's page matches, and that the shared run shows no phone numbers. A run from during a drill is better than one after End.
-- [ ] **03 Show the agent running in the demo.** The console's CREAO strip and "Show agent steps" (the same run id as the CREAO run page), a route proposal approved, the after-action report, and a short cut to the run on agent.creao.ai. See `16-demo-script.md`.
+- [ ] **03 Show the agent running in the demo.** The console's CREAO strip and "Show agent steps" (the same run id as the CREAO run page), a route proposal approved, the after-action report, and a short cut to the run on agent.creao.ai.
 - [ ] Pick the CREAO prize category (Disruptor, One-Person Company or Team Empowerment) on Devpost.
 
 Sentry (entered):
@@ -60,7 +60,7 @@ Decided: engine first, MIT license, Sentry entered (plan below), fire only (floo
 Still to make:
 
 - **Split:** Lincoln leans toward the engine (he's also doing the scan and floor plan); the rest with the team. Separate folders let three people work in parallel (see Parallel sessions in `CLAUDE.md`).
-- **Demo flow:** the 3–5 steps judges see. *(Settled: the demo flow in `CLAUDE.md`; script in `16-demo-script.md`.)*
+- **Demo flow:** the 3–5 steps judges see. *(Settled: the demo flow in `CLAUDE.md`.)*
 - **Floor plan → graph:** hand-trace it, have a vision model read it, or derive it from the scan (`04-build-options.md`).
 - **Crowd sim style:** flow model, agent-based, or both; Lincoln will discuss with the team. How the fire affects the building comes first.
 - **Models:** which one does what (with the team).

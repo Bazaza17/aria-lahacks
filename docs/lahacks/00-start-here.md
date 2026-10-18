@@ -7,7 +7,6 @@ These notes live in three places with the same content: this repo (`docs/lahacks
 ## Submission (Sun Oct 18, due 12:00 PM)
 
 - `15-devpost.md`: the Devpost draft (what it does, built at the event, the CREAO and Sentry sections, prize opt-ins)
-- `16-demo-script.md`: the 2–3 minute demo video script, including the CREAO agents running
 - `05-plan.md`, "Submission checklist": what's done and what still needs a person
 - `08-sentry-moments.md`: the Sentry moments and the "How Sentry shaped Aria" section
 

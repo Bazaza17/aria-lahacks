@@ -70,3 +70,5 @@ Thumbs.db
 
 # Local live-layer SQLite (may hold phone numbers)
 apps/api/*.db
+# Demo video script (kept local, not published)
+docs/lahacks/16-demo-script.md
