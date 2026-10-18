@@ -26,7 +26,7 @@ function BuildingCenterPaneInner({
   buildingId: string;
   scanUrl?: string | null;
 }) {
-  const { surge, setSurge } = useScenario();
+  const { fireTime, setFireTime, playing, setPlaying } = useScenario();
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#0a0a0a]">
@@ -39,7 +39,12 @@ function BuildingCenterPaneInner({
         <BuildingScan buildingId={buildingId} scanUrl={scanUrl} />
       </div>
 
-      <ScenarioStrip surge={surge} onSurgeChange={setSurge} />
+      <ScenarioStrip
+        fireTime={fireTime}
+        onFireTimeChange={setFireTime}
+        playing={playing}
+        onPlayingChange={setPlaying}
+      />
     </div>
   );
 }

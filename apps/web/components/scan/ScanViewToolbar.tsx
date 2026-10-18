@@ -15,14 +15,12 @@ export function ScanViewToolbar({
   buildingId,
   evacOpenCount,
   evacTotal,
-  surgeActive,
 }: {
   mode: ScanViewMode;
   onModeChange: (m: ScanViewMode) => void;
   buildingId: string;
   evacOpenCount: number;
   evacTotal: number;
-  surgeActive: boolean;
 }) {
   const hasEvac = hasEvacPlan(buildingId);
 
@@ -63,7 +61,6 @@ export function ScanViewToolbar({
           <span className={evacOpenCount === 0 ? "text-red-300" : "text-emerald-300"}>
             {evacOpenCount}/{evacTotal} EXITS OPEN
           </span>
-          {surgeActive && <span className="ml-2 text-[#ffb27a]">· SURGE ACTIVE</span>}
         </div>
       )}
     </div>
