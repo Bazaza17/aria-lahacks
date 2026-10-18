@@ -370,15 +370,15 @@
       "is_outdoor": false,
       "polygon": [[33.4, -1.3], [20.4, -1.3], [20.4, -12.2], [33.4, -12.2]],
       "area": 141.7,
-      "floor_elevation": 0.0,
-      "height": 3.0,
-      "height_source": "placeholder",
+      "floor_elevation": 0.16,
+      "height": 3.7,
+      "height_source": "scan",
       "occupant_load": 122,
       "occupant_load_source": "event capacity: Collins Conference Room 250 standing (venue rental page), split by area across 140, 150",
       "detectors": 0,
       "geometry_source": "plan_bbox",
-      "scanned_by": [],
-      "notes": "No device dot. Line near its north wall may be a stage or screen. Not scanned."
+      "scanned_by": ["room4"],
+      "notes": "Room 4 (Collins Room scan, Sat Oct 17): floor +0.16 m (plane fit rms 3 cm); beam soffits 3.64-3.74 m, coffers 4.14-4.24 m (3.7 m used). The scan shows 140+150 as 12.7 x 20.0 m (plan 12.7 x 21.9); the scanned north edge is a drape/stage line ~1.6-2 m short of the plan's north wall (strip not scanned). Polygon still from the plan. No device dot. Line near its north wall may be a stage or screen. Not scanned."
     },
     {
       "id": "150",
@@ -389,15 +389,15 @@
       "is_outdoor": false,
       "polygon": [[33.4, -12.2], [20.4, -12.2], [20.4, -23.7], [33.4, -23.7]],
       "area": 149.5,
-      "floor_elevation": 0.62,
-      "height": 3.0,
-      "height_source": "placeholder",
+      "floor_elevation": 0.7,
+      "height": 3.15,
+      "height_source": "scan",
       "occupant_load": 128,
       "occupant_load_source": "event capacity: Collins Conference Room 250 standing (venue rental page), split by area across 140, 150",
       "detectors": 1,
       "geometry_source": "plan_bbox",
-      "scanned_by": [],
-      "notes": "Floor +0.62 assumed: the Galleria's step band continues between 140 and 150, and room 1 sees 150's floor at its upper level through the glazing. Unverified. The 140/150 line is at z -12.2, where the scans put the step (the plan band's north edge)."
+      "scanned_by": ["room4"],
+      "notes": "Room 4 (Collins Room scan, Sat Oct 17): floor +0.70 m measured (plane fit rms 5 cm), replacing the +0.62 assumption; beam soffits 3.10-3.20 m, coffers 3.60-3.70 m (3.15 m used). Same coffered ceiling height as 140, so the step is real, not drift. Polygon still from the plan. Floor +0.62 assumed: the Galleria's step band continues between 140 and 150, and room 1 sees 150's floor at its upper level through the glazing. Unverified. The 140/150 line is at z -12.2, where the scans put the step (the plan band's north edge)."
     },
     {
       "id": "170",
@@ -674,15 +674,15 @@
       "is_outdoor": true,
       "polygon": [[36.9, -1.2], [33.4, -1.2], [33.4, -12.2], [49.4, -12.2], [49.4, -5.9], [36.9, -5.9]],
       "area": 117.2,
-      "floor_elevation": 0.0,
+      "floor_elevation": 0.08,
       "height": null,
       "height_source": null,
       "occupant_load": 68,
       "occupant_load_source": "event capacity: Collins Patio 320 standing (venue rental page), split by area across courtyard_sw_north, courtyard_sw_south",
       "detectors": 0,
       "geometry_source": "plan_traced",
-      "scanned_by": [],
-      "notes": "Dashed fence perimeter. Includes the west arcade's north end. Split from the south part at the step band (unverified level change). Way out: through the gap into the west stair enclosure and its gate, or via the south part to its west fence gate or the porch gate."
+      "scanned_by": ["room4"],
+      "notes": "Room 4 (Collins Room scan, Sat Oct 17): the west arcade's lower part measures +0.08 m (scanned through the glazing); the rest of the patio is not scanned. Dashed fence perimeter. Includes the west arcade's north end. Split from the south part at the step band (unverified level change). Way out: through the gap into the west stair enclosure and its gate, or via the south part to its west fence gate or the porch gate."
     },
     {
       "id": "courtyard_sw_south",
@@ -693,15 +693,15 @@
       "is_outdoor": true,
       "polygon": [[49.4, -12.2], [33.4, -12.2], [33.4, -23.7], [20.6, -23.7], [20.6, -32.5], [49.4, -32.5]],
       "area": 437.4,
-      "floor_elevation": 0.62,
+      "floor_elevation": 0.67,
       "height": null,
       "height_source": null,
       "occupant_load": 252,
       "occupant_load_source": "event capacity: Collins Patio 320 standing (venue rental page), split by area across courtyard_sw_north, courtyard_sw_south",
       "detectors": 0,
       "geometry_source": "plan_traced",
-      "scanned_by": [],
-      "notes": "Floor +0.62 assumed (south of the step band, like 150); unverified. Includes the west arcade's south end. Event Food area is the part south of 150. Way out: the gate mark on the west fence (UNVERIFIED) or the gate to the south porch."
+      "scanned_by": ["room4"],
+      "notes": "Room 4 (Collins Room scan, Sat Oct 17): the west arcade's upper part measures +0.67 m (the step band continues through the arcade); the rest of the patio is not scanned. Floor +0.62 assumed (south of the step band, like 150); unverified. Includes the west arcade's south end. Event Food area is the part south of 150. Way out: the gate mark on the west fence (UNVERIFIED) or the gate to the south porch."
     },
     {
       "id": "south_porch",
@@ -1401,14 +1401,14 @@
       "b": "140",
       "kind": "opening",
       "position": [20.4, -11.0],
-      "clear_width": 1.5,
-      "effective_width": 1.2,
-      "width_source": "placeholder",
+      "clear_width": 3.3,
+      "effective_width": 3.0,
+      "width_source": "scan",
       "is_exit": false,
       "length": null,
-      "rise": null,
+      "rise": 0.16,
       "protected": null,
-      "notes": "UNVERIFIED: the annunciator draws a solid wall; the event map shows an opening here and room 1 sees no wall where its lower strip meets 140. Not scanned from the Collins side."
+      "notes": "Room 4 (Collins Room scan, Sat Oct 17): open below the header with floor seen beyond (medium confidence). 140 sits ~0.15 m above the Galleria's lower floor; it may be a threshold or short slope (unconfirmed). Previously: UNVERIFIED: the annunciator draws a solid wall; the event map shows an opening here and room 1 sees no wall where its lower strip meets 140. Not scanned from the Collins side."
     },
     {
       "id": "O-galleria_far_end-150",
@@ -1416,14 +1416,14 @@
       "b": "150",
       "kind": "opening",
       "position": [20.4, -19.0],
-      "clear_width": 1.5,
-      "effective_width": 1.2,
-      "width_source": "placeholder",
+      "clear_width": 9.3,
+      "effective_width": 9.0,
+      "width_source": "scan",
       "is_exit": false,
       "length": null,
-      "rise": null,
+      "rise": 0.08,
       "protected": null,
-      "notes": "UNVERIFIED: the annunciator draws a solid wall; the event map shows a second opening here and room 1 sees only posts under a ~2.7 m header (open or glass)."
+      "notes": "Room 4 (Collins Room scan, Sat Oct 17): wide opening from 150 to the Galleria walkway under a header ~3.0 m above 150's floor; rooms 1 and 4 both see floor through it. Medium confidence: it may be 2 openings with unseen glass between. The walkway is under the skylight well, so smoke leaving 150 this way rises straight into the 2F well. Previously: UNVERIFIED: the annunciator draws a solid wall; the event map shows a second opening here and room 1 sees only posts under a ~2.7 m header (open or glass)."
     },
     {
       "id": "D-galleria_far_end-OUT-1",
@@ -1558,7 +1558,7 @@
       "length": null,
       "rise": null,
       "protected": null,
-      "notes": "140's double door near its north end (plan)."
+      "notes": "140's double door near its north end (plan). Room 4 (Collins Room scan, Sat Oct 17): sees a 1.9 m opening from 140 into the corridor west of the core at about (19.9, -6.5) and a closed 1.6 m double door across that corridor's north end at about (18.8, -3.4). Which of these is the plan's door is unresolved; topology unchanged."
     },
     {
       "id": "D-120-OUT-1",
@@ -1641,14 +1641,14 @@
       "b": "150",
       "kind": "step",
       "position": [26.9, -12.2],
-      "clear_width": 13.0,
-      "effective_width": 12.7,
-      "width_source": "plan",
+      "clear_width": 12.7,
+      "effective_width": 12.4,
+      "width_source": "scan",
       "is_exit": false,
       "length": null,
-      "rise": 0.62,
+      "rise": 0.54,
       "protected": null,
-      "notes": "UNVERIFIED: only the triple-line band separates 140 and 150; read as the Galleria's 0.62 m step continuing (room 1 sees 150's floor at the upper level). Could also be an operable partition track."
+      "notes": "Room 4 (Collins Room scan, Sat Oct 17): 4 risers of ~0.135 m (treads ~0.47 m) across the full room depth, 0.54 m total (140 +0.16 to 150 +0.70). No ramp inside the room: the step-free route between 140 and 150 goes out to the Galleria, up the 110A ramp and back along the Galleria walkway. Previously: UNVERIFIED: only the triple-line band separates 140 and 150; read as the Galleria's 0.62 m step continuing (room 1 sees 150's floor at the upper level). Could also be an operable partition track."
     },
     {
       "id": "D-140-OUT",
@@ -2761,5 +2761,6 @@
       "notes": "INFERRED (no door drawn): how 330 is reached is not drawn; assumed a stair inside the tower. Length = code-minimum 7/11 run for the placeholder rise."
     }
   ],
-  "unknowns": ["North is unverified: the annunciator compass is ambiguous. If its solid needle is north, north is venue -z and east is +x. Check with a phone compass at the YOU ARE HERE panel.", "2F (5.0 m) and 3F (8.6 m) elevations are placeholders (2F bracket 4.6-5.5 m; the 2F may be split-level). Every stair rise and length, the elevator rise and the 2F well tops depend on them. A riser count on the west stair would settle it. Every height with height_source 'placeholder' (3.0 m) is also unmeasured.", "PRE-PLAN FINDING: the 2F has one way down that does not depend on the Galleria atrium: the terrace and ST-W (one placeholder 1.5 m stair, then one placeholder gate). 100ST lands in the far end under the skylight wells; both NE flights discharge into 100G, whose only drawn way out is one 1.05 m door into lobby 110 (scan: closed). 230 and 330 have a single route, via the terrace. In a Galleria fire the 2F is left with ST-W only. Not drawn either way: whether 100G's NE tip has an exterior door, and whether D-110-100G is a locked staff door.", "Terrace landing, 230A and the upper block are assumed outdoor (the landing's device dot argues against). Either way they are elevated exit access, not a place of safety: is_exit is on ST-W, not on the terrace doors.", "Event 2F use is unresolved (see occupant_scenarios). Default 2F_indoor (reading B: indoor 2F rooms at assembly density, the stress case). Reading A (2F_terrace) is favoured by the event map's 'Northeast Patio' captions and its stair landing on the terrace; reading B by the event 2F's size. 210_sw has no device dot.", "Widths still placeholders (width_source 'placeholder'; no tape measurements are planned), in order of impact: the west stair's enclosure gate (G-w_stair_enclosure-SAFE) and ST-W, 100ST and both NE flights, the main entrance and porch door leaves, 120's two exterior doors (room 3 saw a 1.75 m gap at D-120-OUT-2), the Collins Patio and PATIO gates.", "Founders' opening (O-110-120): 4.5-6.2 m open in the scans, solid wall on the annunciator; may be an operable wall that closes.", "ANN corridor door frame (D-110-corridor_core) may hold magnetic fire doors that close on alarm; room 1's D1 (D-corridor_core-110) may be a bulkhead, not a door.", "Galleria to Collins openings (O-110-140, O-galleria_far_end-150) come from the event map and room 1's view; the annunciator shows a solid wall.", "150 and the Collins Patio's south part are assumed 0.62 m up (the step band, placed at z -12.2 where the scans put the step); the band could instead be a partition track. 170, the PATIO and the porch levels are assumed.", "200ST landing: the door swing at its east end is read as the closed strip's door (D-landing_200st-strip_2f_s); it could instead be 219's door onto the landing, which would give 219 a short route to 100ST.", "Skylight-well edges at the 2F (railing vs glazing) are unknown; modelled open for smoke. 100ST/200ST is an open stair in a well and is not protected.", "NE stair: two opposing flights from 100G to a landing in 200 (reading of the plan); enclosure and fire rating unknown, so unprotected.", "Inferred links (notes start 'INFERRED'): 130A, 130F, 100A-C and 220 doors; the terrace links; the NW walkway to the stair enclosure; stair 230-330.", "Dead ends and odd spaces: the space north of 130D has no drawn way out; the service yard SE of 110 may be indoors (then 190's door is not an exit); the NW walkway may be covered; 100E/100F are drawn ~2-3 m SE of their plan labels.", "Outdoor routes: the plaza's real route to the public way is not drawn. The Collins Patio west gate and the PATIO east gate are UNVERIFIED readings of fence gate marks, and the gap from the stair enclosure into the Collins Patio is read as open. Time to SAFE is set by these placeholder outdoor gates, so report time to the exit door and time to SAFE separately.", "No step-free route: 3 risers down to the Founders' lawn; the Founders' Patio's way out passes the UP site steps; the PATIO and the service yard leave by DN steps (rises unknown).", "Geometry error: about +/-0.3 m near the scan junction (lobby 110 / core / Founders' opening), +/-1-2 m for anything read off the annunciator photo."]
+  "unknowns": ["North is unverified: the annunciator compass is ambiguous. If its solid needle is north, north is venue -z and east is +x. Check with a phone compass at the YOU ARE HERE panel.", "2F (5.0 m) and 3F (8.6 m) elevations are placeholders (2F bracket 4.6-5.5 m; the 2F may be split-level). Every stair rise and length, the elevator rise and the 2F well tops depend on them. A riser count on the west stair would settle it. Every height with height_source 'placeholder' (3.0 m) is also unmeasured.", "PRE-PLAN FINDING: the 2F has one way down that does not depend on the Galleria atrium: the terrace and ST-W (one placeholder 1.5 m stair, then one placeholder gate). 100ST lands in the far end under the skylight wells; both NE flights discharge into 100G, whose only drawn way out is one 1.05 m door into lobby 110 (scan: closed). 230 and 330 have a single route, via the terrace. In a Galleria fire the 2F is left with ST-W only. Not drawn either way: whether 100G's NE tip has an exterior door, and whether D-110-100G is a locked staff door.", "Terrace landing, 230A and the upper block are assumed outdoor (the landing's device dot argues against). Either way they are elevated exit access, not a place of safety: is_exit is on ST-W, not on the terrace doors.", "Event 2F use is unresolved (see occupant_scenarios). Default 2F_indoor (reading B: indoor 2F rooms at assembly density, the stress case). Reading A (2F_terrace) is favoured by the event map's 'Northeast Patio' captions and its stair landing on the terrace; reading B by the event 2F's size. 210_sw has no device dot.", "Widths still placeholders (width_source 'placeholder'; no tape measurements are planned), in order of impact: the west stair's enclosure gate (G-w_stair_enclosure-SAFE) and ST-W, 100ST and both NE flights, the main entrance and porch door leaves, 120's two exterior doors (room 3 saw a 1.75 m gap at D-120-OUT-2), the Collins Patio and PATIO gates.", "Founders' opening (O-110-120): 4.5-6.2 m open in the scans, solid wall on the annunciator; may be an operable wall that closes.", "ANN corridor door frame (D-110-corridor_core) may hold magnetic fire doors that close on alarm; room 1's D1 (D-corridor_core-110) may be a bulkhead, not a door.", "Galleria to Collins openings: the Collins Room scan sees 3.3 m (O-110-140) and ~9.3 m (O-galleria_far_end-150) of open floor under headers, against the annunciator's solid wall. Medium confidence; there may be glass between posts.", "Levels: the Collins Room scan measured 140 at +0.16 and 150 at +0.70 (4 risers, 0.54 m) and the west arcade at +0.08 / +0.67; the rest of the Collins Patio is not scanned and keeps those levels by assumption. 170, the PATIO and the porch levels are assumed.", "200ST landing: the door swing at its east end is read as the closed strip's door (D-landing_200st-strip_2f_s); it could instead be 219's door onto the landing, which would give 219 a short route to 100ST.", "Skylight-well edges at the 2F (railing vs glazing) are unknown; modelled open for smoke. 100ST/200ST is an open stair in a well and is not protected.", "NE stair: two opposing flights from 100G to a landing in 200 (reading of the plan); enclosure and fire rating unknown, so unprotected.", "Inferred links (notes start 'INFERRED'): 130A, 130F, 100A-C and 220 doors; the terrace links; the NW walkway to the stair enclosure; stair 230-330.", "Dead ends and odd spaces: the space north of 130D has no drawn way out; the service yard SE of 110 may be indoors (then 190's door is not an exit); the NW walkway may be covered; 100E/100F are drawn ~2-3 m SE of their plan labels.", "Outdoor routes: the plaza's real route to the public way is not drawn. The Collins Patio west gate and the PATIO east gate are UNVERIFIED readings of fence gate marks, and the gap from the stair enclosure into the Collins Patio is read as open. Time to SAFE is set by these placeholder outdoor gates, so report time to the exit door and time to SAFE separately.", "No step-free route: 3 risers down to the Founders' lawn; the Founders' Patio's way out passes the UP site steps; the PATIO and the service yard leave by DN steps (rises unknown).", "Geometry error: about +/-0.3 m near the scan junction (lobby 110 / core / Founders' opening), +/-1-2 m for anything read off the annunciator photo."],
+  "changelog": ["Sat Oct 17 ~11 PM: 140, 150, the step between them, the two Galleria-side openings and the west arcade levels updated from the Collins Room scan (room 4). Polygons unchanged."]
 }
