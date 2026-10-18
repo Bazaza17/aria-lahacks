@@ -1,6 +1,7 @@
 // Text chat with the ElevenLabs agent (chat mode over its WebSocket).
 // One open session per person, so the agent keeps the thread; reopened with fresh context if it drops.
 const { ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID } = process.env;
+const BASE = process.env.ELEVENLABS_BASE_URL ?? "https://api.elevenlabs.io"; // a local fake for testing
 
 const REPLY_TIMEOUT_MS = 15_000;
 
@@ -16,7 +17,7 @@ const sessions = new Map<string, Session>();
 
 async function signedUrl() {
   const res = await fetch(
-    `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${ELEVENLABS_AGENT_ID}`,
+    `${BASE}/v1/convai/conversation/get-signed-url?agent_id=${ELEVENLABS_AGENT_ID}`,
     { headers: { "xi-api-key": ELEVENLABS_API_KEY! } },
   );
   if (!res.ok) throw new Error(`ElevenLabs signed URL ${res.status}`);
@@ -33,7 +34,7 @@ async function open(key: string, context: AgentContext): Promise<Session> {
         JSON.stringify({
           type: "conversation_initiation_client_data",
           conversation_config_override: { conversation: { text_only: true } },
-          dynamic_variables: context,
+          dynamic_variables: { ...context, channel: "sms" },
         }),
       ),
     );

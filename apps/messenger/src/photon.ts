@@ -10,7 +10,10 @@ if (!PHOTON_API_KEY || !PHOTON_PROJECT_ID) {
   process.exit(1);
 }
 
-const photon = new Photon({ headers: { Authorization: `Bearer ${PHOTON_API_KEY}` } });
+const photon = new Photon({
+  ...(process.env.PHOTON_BASE_URL ? { baseUrl: process.env.PHOTON_BASE_URL } : {}), // local testing only
+  headers: { Authorization: `Bearer ${PHOTON_API_KEY}` },
+});
 const project = { id: PHOTON_PROJECT_ID };
 
 export type Inbound = {

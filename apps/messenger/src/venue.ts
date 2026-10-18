@@ -1,8 +1,8 @@
 // The building the agent knows about. Single source of truth for routes:
 // the alert text, the agent's context and (later) the dashboard all read this.
 //
-// ⚠ SAMPLE DATA: placeholder layout, not verified against the real building.
-// Replace with the real James West Alumni Center layout after walking the venue.
+// ⚠ FROM THE LA HACKS EVENT MAP: real rooms and doors, but not yet walked. Set verified: true
+// once the exits, step-free access and the assembly point are confirmed at the venue.
 
 export type Exit = {
   id: string;
@@ -39,22 +39,30 @@ export const venue: Venue = {
   verified: false,
   floors: [1, 2],
   exits: [
-    { id: "west-main", label: "West main entrance", floor: 1, location: "west side, facing the lawn", accessible: true },
-    { id: "east-side", label: "East side door", floor: 1, location: "east hallway, by the kitchen", accessible: true },
-    { id: "north-patio", label: "North patio doors", floor: 1, location: "north side of the main hall", accessible: true },
+    { id: "main-entrance", label: "Main entrance (check-in)", floor: 1, location: "the covered entry at Entrance & Check-in, by the lobby", accessible: false },
+    { id: "galleria-back-doors", label: "Galleria back doors (south porch)", floor: 1, location: "glass back wall of the Galleria's far end, by the curved stair, out to the south porch", accessible: false },
+    { id: "collins-patio-doors", label: "Collins Room patio doors", floor: 1, location: "east wall of the Collins Room, out to Collins Patio (food area)", accessible: false },
+    { id: "founders-patio-doors", label: "Founders' Room patio doors", floor: 1, location: "east wall of the Founders' Room, out to Founders' Patio", accessible: false },
+    { id: "stairs-down", label: "Stairs down to Collins Patio", floor: 2, location: "top of the outside stairs, at the terrace's edge by the round tower", accessible: false },
   ],
   stairwells: [
-    { id: "stair-a", label: "Stairwell A", floors: [1, 2], location: "west end, next to the main entrance" },
-    { id: "stair-b", label: "Stairwell B", floors: [1, 2], location: "east end, by the restrooms" },
+    { id: "outside-stairs", label: "Outside stairs", floors: [1, 2], location: "the west exterior stair: from Collins Patio up to the 2nd-floor terrace (the Northeast Patio on the event map)" },
   ],
-  elevators: ["Main elevator in the lobby. Do not use it during a fire."],
+  elevators: ["None marked on the event map. Do not use any elevator during a fire."],
   assemblyPoint: "North lawn, across from Pauley Pavilion",
-  refugeAreas: ["Floor 2 landing of Stairwell A"],
+  refugeAreas: ["None marked on the event map; confirm with venue staff. Until then, anyone who can't use the stairs stays put and replies HELP."],
   routes: [
-    { floor: 1, steps: ["Leave through the west main entrance", "Walk to the north lawn"], exitId: "west-main", backupExitId: "north-patio" },
-    { floor: 2, steps: ["Take Stairwell B down to floor 1", "Exit through the east side door", "Walk to the north lawn"], exitId: "east-side", backupExitId: "west-main" },
+    { floor: 1, steps: ["Leave through the main entrance by check-in", "Walk to the north lawn"], exitId: "main-entrance", backupExitId: "collins-patio-doors" },
+    { floor: 2, steps: ["Take the outside stairs down to Collins Patio", "Walk away from the building to the north lawn"], exitId: "stairs-down" },
   ],
-  notes: ["The main hall can hold large events; expect crowds at the west entrance."],
+  notes: [
+    "Floor 1 rooms: Entrance & check-in, Galleria (sponsor booths), Restrooms, Collins Room (hacking), Founders' Room (hacking).",
+    "People at the back of the Galleria (the far end, by the curved stair) leave by the Galleria back doors to the south porch.",
+    "Floor 1 outdoors: Collins Patio (food, hacking) and Founders' Patio (hacking). People there are already outside: send them away from the building to the north lawn.",
+    "Floor 2 is the Northeast Patio, an outdoor terrace (networking and workshops). Its way down that avoids the Galleria is the outside stairs to Collins Patio.",
+    "Source: LA Hacks event map and the scanned venue model (packages/engine/venue.json). Exits not yet walked, step-free access not confirmed, assembly point not confirmed.",
+    "Keep in step with apps/api/app/creao/buildings/james_west.json.",
+  ],
 };
 
 const exitLabel = (id: string) => venue.exits.find((e) => e.id === id)?.label ?? id;
@@ -69,7 +77,7 @@ export function routeFor(floor: number | undefined): string {
 /** The layout as plain text for the agent's {{venue}} variable. */
 export function renderVenue(): string {
   const lines = [
-    `Building: ${venue.name}${venue.verified ? "" : " (sample layout, unverified)"}`,
+    `Building: ${venue.name}${venue.verified ? "" : " (from the event map, not yet walked)"}`,
     `Floors: ${venue.floors.join(", ")}`,
     "Exits:",
     ...venue.exits.map((e) => `- ${e.label} (floor ${e.floor}, ${e.location}${e.accessible ? ", step-free" : ""})`),

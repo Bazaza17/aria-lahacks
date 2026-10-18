@@ -1,9 +1,11 @@
 // Create the ElevenLabs agent (first run) or update it from src/agent-prompt.ts,
 // uploading every knowledge/*.md file to its knowledge base first.
+// With ARIA_PUBLIC_URL (Aria's API, reachable from ElevenLabs) and ARIA_TOOL_SECRET, it also registers
+// the update_aria live-update webhook; the secret goes into ElevenLabs' secret store, not the config.
 // First run appends ELEVENLABS_AGENT_ID to .env.
 import { appendFileSync, readdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { agentConfig } from "../src/agent-prompt.ts";
+import { agentConfig, ariaTool } from "../src/agent-prompt.ts";
 
 const key = process.env.ELEVENLABS_API_KEY;
 if (!key) throw new Error("Set ELEVENLABS_API_KEY in .env");
@@ -37,8 +39,33 @@ for (const file of readdirSync("knowledge").filter((f) => f.endsWith(".md"))) {
   console.log(`knowledge: ${name} (${doc.id})`);
 }
 
+// The live-update webhook (tools are their own resources now; agents attach them by tool_ids).
+const toolIds: string[] = [];
+const ariaUrl = process.env.ARIA_PUBLIC_URL, toolSecret = process.env.ARIA_TOOL_SECRET;
+if (ariaUrl && toolSecret) {
+  const SECRET = "aria_tool_secret";
+  const { secrets } = await call<{ secrets: { secret_id: string; name: string }[] }>("/secrets");
+  const stored = secrets.find((x) => x.name === SECRET);
+  const secret = await call<{ secret_id: string }>(stored ? `/secrets/${stored.secret_id}` : "/secrets", {
+    method: stored ? "PATCH" : "POST",
+    body: JSON.stringify({ type: stored ? "update" : "new", name: SECRET, value: toolSecret }),
+  });
+  const tool_config = ariaTool(ariaUrl, secret.secret_id);
+  const { tools } = await call<{ tools: { id: string; tool_config: { name: string } }[] }>("/tools?page_size=100");
+  const found = tools.find((t) => t.tool_config.name === tool_config.name);
+  const saved = await call<{ id: string }>(found ? `/tools/${found.id}` : "/tools", {
+    method: found ? "PATCH" : "POST",
+    body: JSON.stringify({ tool_config }),
+  });
+  toolIds.push(saved.id);
+  console.log(`tool: ${tool_config.name} -> ${tool_config.api_schema.url} (${saved.id})`);
+} else {
+  console.warn("ARIA_PUBLIC_URL or ARIA_TOOL_SECRET not set: no live-update tool, calls only report after hang-up");
+}
+
 const config = structuredClone(agentConfig);
 (config.conversation_config.agent.prompt as Record<string, unknown>).knowledge_base = knowledgeBase;
+(config.conversation_config.agent.prompt as Record<string, unknown>).tool_ids = toolIds;
 
 const body = await call<{ agent_id?: string }>(existing ? `/agents/${existing}` : "/agents/create", {
   method: existing ? "PATCH" : "POST",

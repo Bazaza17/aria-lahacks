@@ -1,6 +1,7 @@
 import { sendText } from "./photon.ts";
 import { resetAgent, type AgentContext } from "./eleven.ts";
 import { venue, routeFor, renderVenue } from "./venue.ts";
+import { liveContext, rememberApproved } from "./aria-live.ts";
 
 export type Contact = { handle: string; spaceId: string; agentId: string };
 
@@ -40,6 +41,9 @@ export function agentContext(phone: string): AgentContext {
     route: a?.route ?? routeFor(undefined),
     last_instruction: a?.text ?? "none yet",
     summary: a ? `Alerted by text about a fire on floor ${a.originFloor}.` : "No alert sent yet.",
+    phone, // for the update_aria tool only; the prompt never shows it
+    building_id: process.env.ARIA_BUILDING_ID ?? "none",
+    ...liveContext(phone), // the dispatcher-approved route from Aria's live layer, when there is one
   };
 }
 
@@ -62,4 +66,14 @@ export async function sendAlert(input: AlertInput) {
   lastAlert.set(input.phone, { ...alert, text });
   resetAgent(input.phone); // next reply starts a fresh agent session with this alert as context
   return { to: input.phone, text, status: sent.status };
+}
+
+/** Text a registered person this exact message (an alert or route change approved in Aria's live layer). */
+export async function sendInstruction(phone: string, text: string) {
+  const contact = contacts.get(phone);
+  if (!contact) throw new NotRegisteredError(`${phone} hasn't texted the line yet, so Photon can't message them first`);
+  const sent = await sendText(contact, text);
+  rememberApproved(phone, text);
+  resetAgent(phone); // the next reply starts a fresh agent session with this instruction as context
+  return { to: phone, text, status: sent.status };
 }
