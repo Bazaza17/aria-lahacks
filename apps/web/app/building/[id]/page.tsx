@@ -37,6 +37,13 @@ export default async function BuildingPage({ params }: { params: Promise<{ id: s
           </span>
           <span className="hidden md:inline">·</span>
           <span className="hidden md:inline">ID {building.id.slice(0, 8).toUpperCase()}</span>
+          {/* The live dispatch console, served by the API through this app's /live proxy. */}
+          <a
+            href="/live/view"
+            className="rounded border border-[#ff6b00]/40 px-3 py-1.5 text-[#ff6b00] transition-colors hover:bg-[#ff6b00]/10"
+          >
+            LIVE CONSOLE →
+          </a>
         </div>
       </header>
 

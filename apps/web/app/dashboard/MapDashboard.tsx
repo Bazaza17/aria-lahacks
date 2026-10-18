@@ -281,6 +281,13 @@ export function MapDashboard({
           <span className="text-white/25">·</span>
           <span className="text-white/60">LOS ANGELES</span>
         </div>
+        {/* The live dispatch console, served by the API through this app's /live proxy. */}
+        <a
+          href="/live/view"
+          className="pointer-events-auto shrink-0 whitespace-nowrap rounded-md border border-[#ff6b00]/40 bg-black/75 px-4 py-2 font-mono text-xs tracking-[0.3em] text-[#ff6b00] backdrop-blur transition-colors hover:bg-[#ff6b00]/10"
+        >
+          LIVE CONSOLE →
+        </a>
       </div>
 
       {/* Popover */}
