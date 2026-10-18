@@ -371,7 +371,7 @@ async function loadStarts() {
     const j = await r.json();
     // rooms people were in, named like the map (the profile's zones), by floor
     const zoneOf = (id) => S.profile?.zones?.find((z) => z.spaces.includes(id));
-    const list = j.starts.filter((x) => x.occupant_load > 0).map((x) => ({ ...x, label: `${shortLabel(zoneOf(x.id)?.label || x.name)} · ${x.id}` }));
+    const list = j.starts.filter((x) => x.occupant_load > 0).map((x) => ({ ...x, label: x.label || `${shortLabel(zoneOf(x.id)?.label || x.name)} · ${x.id}` }));
     starts = { def: j.default, list: list.sort((a, b) => (a.storey + a.label).localeCompare(b.storey + b.label)) };
   } catch (e) { console.warn("engine starts", e); starts = { def: null, list: [] }; }
   return starts;
@@ -406,13 +406,14 @@ async function endEvacuation(btn) {
   try { await api(`/live/evacuations/${ev.id}/end`, { method: "POST", body: "{}" }); } catch (e) { alert(e.message); }
   finally { ctlFor = null; refresh(); }
 }
-const mmss = (min) => { const t = Math.round(min * 60); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
+// Exact seconds when the engine sent them (t_s, last_out_s), floored like the web size-up's clock.
+const mmss = (min, s) => { const t = Math.floor(s ?? min * 60); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
 function renderFireline() {
   const fm = S.s?.fire_model, sm = fm?.summary, el = $("fireline");
   if (!S.s?.evacuation || !fm) { el.classList.remove("on"); el.innerHTML = ""; return; }
   const now = S.s.evacuation.minute_now || 0;
-  const lost = (sm?.exits_lost || []).slice(0, 6).map((x) => `<span class="x ${x.minute <= now ? "gone" : ""}" title="${esc(x.label)}">${esc(shortLabel(x.label))}<b>${mmss(x.minute)}</b></span>`).join("");
-  const risk = sm ? `${sm.at_risk_leaving_now ?? "–"} of ${sm.occupants} at risk leaving now${sm.last_out_min != null ? ` · last out ${mmss(sm.last_out_min)}` : ""} · ${sm.at_risk_obvious_route ?? "–"} by the obvious way` : "";
+  const lost = (sm?.exits_lost || []).slice(0, 6).map((x) => `<span class="x ${x.minute <= now ? "gone" : ""}" title="${esc(x.label)}">${esc(shortLabel(x.label))}<b>${mmss(x.minute, x.t_s)}</b></span>`).join("");
+  const risk = sm ? `${sm.at_risk_leaving_now ?? "–"} of ${sm.occupants} at risk leaving now${sm.last_out_min != null ? ` · last out ${mmss(sm.last_out_min, sm.last_out_s)}` : ""} · ${sm.at_risk_obvious_route ?? "–"} by the obvious way` : "";
   el.innerHTML = `<span class="tag">${fm.source === "aria-engine" ? "ENGINE · SIMULATION" : "FIRE MODEL · " + esc((fm.source || "manual").toUpperCase())}</span>
     <span>Fire starts in <b>${esc(fm.origin?.label || S.origin || "?")}</b>${sm?.growth ? ` · ${esc(sm.growth)} growth` : ""}</span>
     ${lost ? `<span class="x">Exits lost:</span>${lost}` : ""}<span class="risk">${esc(risk)}</span>`;

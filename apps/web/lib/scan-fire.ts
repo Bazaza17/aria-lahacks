@@ -105,6 +105,8 @@ export function fireTimelineUrl(buildingId: string): string {
 export type FireStart = {
   id: string;
   name: string;
+  /** Clean picker label from the plan name ("Room 126", not "126 (could read 128)"). */
+  label?: string;
   storey: string | null;
   kind: string | null;
   occupant_load: number;

@@ -128,10 +128,11 @@ def _steps(building: Building, result: dict, origin_zone: Zone | None) -> list[d
     spaces = fire.get("spaces") or {}
     steps = []
 
-    def add(minute: float, place, kind: str, severity: str, place_kind: str) -> None:
+    def add(t_s: float, place, kind: str, severity: str, place_kind: str) -> None:
         steps.append(
             {
-                "minute": minute,
+                "minute": _minute(t_s),
+                "t_s": round(t_s, 1),  # exact, for display (minute is rounded to 0.1)
                 "place": place.id,
                 "place_kind": place_kind,
                 "label": place.label,
@@ -148,9 +149,9 @@ def _steps(building: Building, result: dict, origin_zone: Zone | None) -> list[d
         smoke = [r["smoke_enters_s"] for r in rows if r.get("smoke_enters_s") is not None]
         bad = [r["blocked_s"] for r in rows if r.get("blocked_s") is not None]
         if smoke and zone is not origin_zone:
-            add(_minute(min(smoke)), zone, "smoke", "medium", "zone")
+            add(min(smoke), zone, "smoke", "medium", "zone")
         if bad:
-            add(_minute(min(bad)), zone, "untenable", "high", "zone")
+            add(min(bad), zone, "untenable", "high", "zone")
     lost = {e["exit"]: e.get("lost_s") for e in fire.get("exits") or []}
     openings = fire.get("openings") or {}
     for x in building.exits:
@@ -160,7 +161,7 @@ def _steps(building: Building, result: dict, origin_zone: Zone | None) -> list[d
         ]
         times = [t for t in times if t is not None]
         if times:
-            add(_minute(min(times)), x, "exit lost", "high", "exit")
+            add(min(times), x, "exit lost", "high", "exit")
     steps.sort(key=lambda s: s["minute"])
     return steps
 
@@ -169,21 +170,24 @@ def _summary(building: Building, result: dict, start: str, origin_label: str) ->
     fire, summ = result["fire"], result.get("summary") or {}
     dep0 = (result["routes"]["departures"] or [{}])[0]
     exits_lost, kept = [], []
-    steps = {
-        s["place"]: s["minute"] for s in _steps(building, result, None) if s["kind"] == "exit lost"
-    }
+    steps = {s["place"]: s for s in _steps(building, result, None) if s["kind"] == "exit lost"}
     for x in building.exits:
         if x.id in steps:
-            exits_lost.append({"exit_id": x.id, "label": x.label, "minute": steps[x.id]})
+            st = steps[x.id]
+            exits_lost.append(
+                {"exit_id": x.id, "label": x.label, "minute": st["minute"], "t_s": st["t_s"]}
+            )
         else:
             kept.append({"exit_id": x.id, "label": x.label})
-    exits_lost.sort(key=lambda e: e["minute"])
+    exits_lost.sort(key=lambda e: e["t_s"])
     occupants = sum((s.get("occupants") or 0) for s in (dep0.get("spaces") or {}).values())
-    last_out = [
-        ((s.get("predictive") or {}).get("flow") or {}).get("last_out_s")
-        for s in (dep0.get("spaces") or {}).values()
+    # Same rule as the web size-up (routes/engine.py _all_out): groups that got people out.
+    flows = [
+        ((s.get("predictive") or {}).get("flow") or {}) for s in (dep0.get("spaces") or {}).values()
     ]
-    last_out = [t for t in last_out if t is not None]
+    last_out = [
+        f["last_out_s"] for f in flows if f.get("cleared") and f.get("last_out_s") is not None
+    ]
     at_risk = dep0.get("occupants_at_risk") or {}
     growth = result["scenario"].get("growth")
     first_bad = summ.get("first_untenable_beyond_origin") or summ.get("first_untenable") or {}
@@ -209,6 +213,7 @@ def _summary(building: Building, result: dict, start: str, origin_label: str) ->
         "at_risk_leaving_now": at_risk.get("predictive"),
         "at_risk_obvious_route": at_risk.get("reactive"),
         "last_out_min": round(max(last_out) / 60, 1) if last_out else None,
+        "last_out_s": round(max(last_out), 1) if last_out else None,
         "first_untenable": {
             "minute": _minute(first_bad.get("t_s")),
             "space": first_bad.get("space"),

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -78,6 +79,26 @@ def _opening_label(oid: str) -> str:
     return f"{_space_name(o.get('a'))} to {_space_name(o.get('b'))}"
 
 
+# Notes from reading the floor plan photo ("could read 128"), not names.
+_PLAN_NOTES = ("could read", "reads like", "maybe", "you are here", " or ")
+
+
+def _start_label(s: dict) -> str:
+    """A picker label from venue.json's plan name: keeps the useful qualifier ("210 (north
+    part)") and drops plan-reading notes and trailing detail ("126 (could read 128)" -> "126")."""
+    name = s.get("name") or s["id"]
+    m = re.match(r"^(.*?)\s*\((.*?)\)", name)
+    if m:
+        head, inner = m.groups()
+        keep = [c.strip() for c in re.split(r"[;,]", inner) if c.strip()]
+        keep = [c for c in keep if not any(w in f" {c.lower()} " for w in _PLAN_NOTES)]
+        label = f"{head} ({', '.join(keep)})" if keep else head
+    else:
+        label = name.split(", with ")[0]
+    # A bare room number reads better as "Room 126".
+    return f"Room {label}" if re.match(r"^\d{3}[A-Z]?(\s|$)", label) else label
+
+
 @lru_cache(maxsize=1)
 def starts() -> list[dict]:
     """Indoor spaces a fire can start in, from venue.json."""
@@ -89,6 +110,7 @@ def starts() -> list[dict]:
             {
                 "id": s["id"],
                 "name": s.get("event_name") or s.get("name") or s["id"],
+                "label": _start_label(s),
                 "storey": s.get("storey"),
                 "kind": s.get("kind"),
                 "occupant_load": s.get("occupant_load", 0),

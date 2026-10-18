@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { Analytics } from "@vercel/analytics/next";
 import { BRAND, LEGAL } from "@/lib/brand";
 import "./globals.css";
 
@@ -31,8 +30,8 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full bg-black text-white">
+        {/* Vercel Web Analytics is off on this project, so its script 404s; Sentry covers us. */}
         {children}
-        <Analytics />
       </body>
     </html>
   );

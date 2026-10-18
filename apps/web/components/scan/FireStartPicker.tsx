@@ -29,8 +29,8 @@ export function FireStartPicker({ starts, value, busy, failed, onChange }: Props
             {starts
               .filter((s) => (s.storey ?? "?") === storey)
               .map((s) => (
-                <option key={s.id} value={s.id} className="bg-black">
-                  {s.name} · {s.id}
+                <option key={s.id} value={s.id} title={s.id} className="bg-black">
+                  {s.label ?? s.name}
                 </option>
               ))}
           </optgroup>
