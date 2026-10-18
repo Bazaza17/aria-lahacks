@@ -28,16 +28,21 @@ import {
   loadFireTimeline,
   type FireTimeline,
 } from "@/lib/scan-fire";
+import { loadPlaceIndex, searchPlaces, type PlaceIndex } from "@/lib/scan-places";
 
 import { HazardPinFilter } from "./HazardPinFilter";
+import { PlaceSearch, type PlaceFound } from "./PlaceSearch";
 import { ScanViewToolbar } from "./ScanViewToolbar";
 import {
   buildEvacLayer,
   buildFireLayer,
   buildFireRouteLayer,
+  buildPlacePinLayer,
+  resolvePlacePin,
   type EvacLayerObjects,
   type FireLayerObjects,
   type FireRouteLayerObjects,
+  type PlacePinLayerObjects,
 } from "./scanSceneLayers";
 
 export type ScanViewMode = "default" | "evac" | "hazards";
@@ -65,6 +70,10 @@ const SCANS: Record<string, string | undefined> = {
 const DEFAULT_FLOOR_Y = -0.85;
 
 const PIN_REVEAL_MS = 180;
+// A vague query ("door") can tie many places; pin this many and list the rest as a count.
+const MAX_PLACE_PINS = 8;
+// Camera pitch when it moves to a found place (radians above the horizon).
+const PLACE_FOCUS_PITCH = 0.9;
 const SEVERITY_GLOW: Record<string, number> = {
   LOW: 0.35,
   MODERATE: 0.55,
@@ -81,6 +90,9 @@ type SceneBundle = {
   pinRoot: THREE.Group;
   evacRoot: THREE.Group;
   fireRoot: THREE.Group;
+  placeRoot: THREE.Group;
+  /** The loaded scan itself, for snapping place pins onto its floor. */
+  scan: THREE.Object3D;
   meshSize: THREE.Vector3;
   meshCenter: THREE.Vector3;
   dispose: () => void;
@@ -102,12 +114,15 @@ export function BuildingScan({
   const evacLayerRef = useRef<EvacLayerObjects | null>(null);
   const fireLayerRef = useRef<FireLayerObjects | null>(null);
   const routeLayerRef = useRef<FireRouteLayerObjects | null>(null);
+  const placeLayerRef = useRef<PlacePinLayerObjects | null>(null);
   const animatedPinIdsRef = useRef(new Set<string>());
   const viewModeRef = useRef<ScanViewMode>("default");
 
   const { report, running } = useAgentRun();
   const { surge, fireTime } = useScenario();
   const [fireTimeline, setFireTimeline] = useState<FireTimeline | null>(null);
+  const [placeIndex, setPlaceIndex] = useState<PlaceIndex | null>(null);
+  const [placeFound, setPlaceFound] = useState<PlaceFound | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [interacted, setInteracted] = useState(false);
@@ -148,6 +163,51 @@ export function BuildingScan({
       cancelled = true;
     };
   }, [buildingId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadPlaceIndex(buildingId).then((index) => {
+      if (!cancelled) setPlaceIndex(index);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [buildingId]);
+
+  const clearPlacePins = () => {
+    const layer = placeLayerRef.current;
+    if (!layer) return;
+    sceneRef.current?.placeRoot.remove(layer.group);
+    layer.dispose();
+    placeLayerRef.current = null;
+  };
+
+  // One search: run it, snap each match onto the scan floor (one raycast pass), pin, focus.
+  const findPlace = (query: string) => {
+    const bundle = sceneRef.current;
+    if (!bundle || !placeIndex) return;
+    clearPlacePins();
+    const result = searchPlaces(placeIndex, query);
+    const floorY = fireTimeline?.scan.floor_y ?? placeIndex.frame.floor_y ?? DEFAULT_FLOOR_Y;
+    const pins = result.matches
+      .slice(0, MAX_PLACE_PINS)
+      .map((m) => resolvePlacePin(m, bundle.scan, bundle.meshCenter, floorY));
+    if (pins.length > 0) {
+      const layer = buildPlacePinLayer(pins, bundle.meshCenter);
+      bundle.placeRoot.add(layer.group);
+      placeLayerRef.current = layer;
+      focusCamera(
+        bundle,
+        pins.map((p) => p.at),
+      );
+    }
+    setPlaceFound({ result, pins });
+  };
+
+  const handlePlaceClear = () => {
+    clearPlacePins();
+    setPlaceFound(null);
+  };
 
   const fireEvent = fireTimeline ? latestEvent(fireTimeline, fireTime) : null;
   const departure = fireTimeline ? departureAt(fireTimeline, fireTime) : null;
@@ -237,7 +297,8 @@ export function BuildingScan({
       const pinRoot = new THREE.Group();
       const evacRoot = new THREE.Group();
       const fireRoot = new THREE.Group();
-      scene.add(fireRoot, evacRoot, pinRoot);
+      const placeRoot = new THREE.Group();
+      scene.add(fireRoot, evacRoot, pinRoot, placeRoot);
 
       const isGltf = /\.(glb|gltf)(\?|$)/i.test(scanUrl);
       try {
@@ -289,6 +350,8 @@ export function BuildingScan({
           pinRoot,
           evacRoot,
           fireRoot,
+          placeRoot,
+          scan: group,
           meshSize: size.clone(),
           meshCenter: center.clone(),
           dispose: () => {
@@ -296,11 +359,13 @@ export function BuildingScan({
             ro.disconnect();
             evacLayerRef.current?.dispose();
             fireLayerRef.current?.dispose();
+            placeLayerRef.current?.dispose();
             controls.dispose();
             renderer.dispose();
             pinRoot.clear();
             evacRoot.clear();
             fireRoot.clear();
+            placeRoot.clear();
             scene.clear();
             if (renderer.domElement.parentNode === mount) {
               mount.removeChild(renderer.domElement);
@@ -356,6 +421,7 @@ export function BuildingScan({
       pinObjectsRef.current = [];
       evacLayerRef.current = null;
       fireLayerRef.current = null;
+      placeLayerRef.current = null;
       while (mount.firstChild) mount.removeChild(mount.firstChild);
     };
   }, [scanUrl]);
@@ -539,7 +605,11 @@ export function BuildingScan({
             buildingId={buildingId}
             evacOpenCount={evacOpen}
             evacTotal={evacTotal}
-          />
+          >
+            {placeIndex && (
+              <PlaceSearch found={placeFound} onSearch={findPlace} onClear={handlePlaceClear} />
+            )}
+          </ScanViewToolbar>
         )}
 
         {loaded && !failed && viewMode === "hazards" && allPins.length > 0 && (
@@ -610,6 +680,20 @@ function buildPinObject(
   group.add(label);
 
   return group;
+}
+
+/** Look down at a set of points from the current heading, close enough to see them all. */
+function focusCamera({ camera, controls }: SceneBundle, points: THREE.Vector3[]) {
+  const box = new THREE.Box3().setFromPoints(points);
+  const target = box.getCenter(new THREE.Vector3());
+  const spread = box.getSize(new THREE.Vector3()).length();
+  const dist = THREE.MathUtils.clamp(spread * 1.5 + 12, controls.minDistance, controls.maxDistance);
+  const heading = camera.position.clone().sub(controls.target).setY(0).normalize();
+  const dir = heading.multiplyScalar(Math.cos(PLACE_FOCUS_PITCH)).setY(Math.sin(PLACE_FOCUS_PITCH));
+  controls.autoRotate = false;
+  controls.target.copy(target);
+  camera.position.copy(target).addScaledVector(dir, dist);
+  controls.update();
 }
 
 function disposePinObject(obj: THREE.Object3D) {
