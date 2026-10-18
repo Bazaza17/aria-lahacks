@@ -299,10 +299,30 @@ def _exits(result: dict) -> dict:
     }
 
 
+def _best_on_grid(departures: list[dict], flashover_s: float | None) -> dict | None:
+    """Where Aria's plan matters most, on the panel's own departure times (the engine's
+    best_moment scans every 15 s, so its time can fall between them and the panel's numbers
+    wouldn't match). Before the first flashover, the most people saved; earliest on ties."""
+    best = None
+    for d in departures:
+        if flashover_s is not None and d["t0_s"] >= flashover_s:
+            continue
+        saved = d["self"]["at_risk"] - d["plan"]["at_risk"]
+        if saved > 0 and (best is None or saved > best["saved"]):
+            best = {
+                "t0_s": d["t0_s"],
+                "plan_at_risk": d["plan"]["at_risk"],
+                "self_at_risk": d["self"]["at_risk"],
+                "saved": saved,
+            }
+    return best
+
+
 def _sizeup(result: dict) -> dict:
     s, sc = result["summary"], result["scenario"]
     start = sc["start_space"]
-    best = s.get("best_moment")
+    departures = _departures(result)
+    first_flashover = result["fire"]["validity"].get("first_flashover_s")
     return {
         "verified": bool(result["viewer"].get("verified")),
         "origin": {
@@ -314,21 +334,12 @@ def _sizeup(result: dict) -> dict:
         },
         "first_smoke_beyond_origin": _mark(s.get("first_smoke_beyond_origin")),
         "first_untenable_beyond_origin": _mark(s.get("first_untenable_beyond_origin")),
-        "first_flashover_s": result["fire"]["validity"].get("first_flashover_s"),
+        "first_flashover_s": first_flashover,
         **_exits(result),
-        "departures": _departures(result),
+        "departures": departures,
         "ways_down": _ways_down(s),
         "check_on_site": _check_on_site(s),
-        "best_moment": (
-            {
-                "t0_s": best["t0_s"],
-                "plan_at_risk": best["at_risk"]["predictive"],
-                "self_at_risk": best["at_risk"]["reactive"],
-                "saved": best["saved"],
-            }
-            if best
-            else None
-        ),
+        "best_moment": _best_on_grid(departures, first_flashover),
         "assumptions": SIZEUP_ASSUMPTIONS,
         "provenance": PROVENANCE_NOTE,
     }
