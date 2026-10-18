@@ -1,0 +1,229 @@
+{
+  "id": "e5a3fddc-e22c-431c-a5d3-ee29ef8604d1",
+  "name": "The Dock",
+  "address": "400 NW 26th St, Miami, FL 33127",
+  "lat": 25.801267443503537,
+  "lng": -80.20217163896397,
+  "_scan_note": "No scan: the Miami demo scan lives in the original Aria's Supabase, which this repo must not use. Upload one to this project's scans bucket and set scan_url to add it.",
+  "lines": [
+    "+15550001111"
+  ],
+  "geo": {
+    "bearing_deg": 0,
+    "width_m": 26,
+    "depth_m": 38,
+    "height_m": 9
+  },
+  "floors": [
+    {
+      "level": 1,
+      "label": "Ground floor",
+      "ny": 0.05
+    }
+  ],
+  "assembly_exit_id": "exit_assembly_street",
+  "_anchors_note": "Anchors and ids are copied from apps/web/lib/scan-evac-paths.ts (VIEWPOINT_ANCHORS / EVAC_DATA) so pins line up with Aria's scan overlays.",
+  "zones": [
+    {
+      "id": "bay_entrance",
+      "label": "Bay entrance",
+      "floor": 1,
+      "anchor": {
+        "nx": 0.45,
+        "ny": 0.05,
+        "nz": 0.12
+      },
+      "aliases": [
+        "entrance",
+        "front entrance",
+        "main entrance",
+        "front of the bay",
+        "by the main door"
+      ]
+    },
+    {
+      "id": "bay_main",
+      "label": "Main bay",
+      "floor": 1,
+      "anchor": {
+        "nx": 0.4,
+        "ny": 0.05,
+        "nz": 0.26
+      },
+      "aliases": [
+        "main bay",
+        "bay floor",
+        "warehouse floor",
+        "open floor",
+        "main floor"
+      ]
+    },
+    {
+      "id": "bay_center",
+      "label": "Center of the bay",
+      "floor": 1,
+      "anchor": {
+        "nx": 0.35,
+        "ny": 0.05,
+        "nz": 0.4
+      },
+      "aliases": [
+        "center of the bay",
+        "middle of the bay"
+      ]
+    },
+    {
+      "id": "bay_rear",
+      "label": "Rear of the bay",
+      "floor": 1,
+      "anchor": {
+        "nx": 0.3,
+        "ny": 0.05,
+        "nz": 0.54
+      },
+      "aliases": [
+        "back of the bay",
+        "rear of the bay"
+      ]
+    },
+    {
+      "id": "side_north",
+      "label": "North side",
+      "floor": 1,
+      "anchor": {
+        "nx": 0.12,
+        "ny": 0.05,
+        "nz": 0.42
+      },
+      "aliases": [
+        "north side",
+        "north wall",
+        "side corridor",
+        "north corridor"
+      ]
+    },
+    {
+      "id": "dock_threshold",
+      "label": "Dock threshold",
+      "floor": 1,
+      "anchor": {
+        "nx": 0.28,
+        "ny": 0.05,
+        "nz": 0.66
+      },
+      "aliases": [
+        "dock threshold",
+        "rear threshold",
+        "near the dock",
+        "dock area"
+      ]
+    },
+    {
+      "id": "street_assembly",
+      "label": "Street assembly point",
+      "floor": 1,
+      "anchor": {
+        "nx": 0.3,
+        "ny": 0.04,
+        "nz": 0.9
+      },
+      "aliases": [
+        "assembly point",
+        "nw 26th",
+        "26th street",
+        "parking lot"
+      ]
+    }
+  ],
+  "exits": [
+    {
+      "id": "exit_main_bay",
+      "label": "Main bay door",
+      "zone": "bay_entrance",
+      "anchor": {
+        "nx": 0.45,
+        "ny": 0.05,
+        "nz": 0.12
+      },
+      "aliases": [
+        "main bay door",
+        "bay door",
+        "roll-up door",
+        "roll up door",
+        "main door",
+        "front door"
+      ]
+    },
+    {
+      "id": "exit_loading_dock",
+      "label": "Loading dock",
+      "zone": "bay_main",
+      "anchor": {
+        "nx": 0.58,
+        "ny": 0.05,
+        "nz": 0.3
+      },
+      "aliases": [
+        "loading dock",
+        "dock door",
+        "side loading",
+        "loading door",
+        "loading bay"
+      ]
+    },
+    {
+      "id": "exit_side_north",
+      "label": "North side egress",
+      "zone": "side_north",
+      "anchor": {
+        "nx": 0.1,
+        "ny": 0.05,
+        "nz": 0.42
+      },
+      "aliases": [
+        "north side egress",
+        "north side door",
+        "north door",
+        "north exit",
+        "side door",
+        "personnel door"
+      ]
+    },
+    {
+      "id": "exit_dock_threshold",
+      "label": "Dock threshold",
+      "zone": "dock_threshold",
+      "anchor": {
+        "nx": 0.28,
+        "ny": 0.05,
+        "nz": 0.66
+      },
+      "aliases": [
+        "dock threshold",
+        "rear threshold",
+        "back door",
+        "rear exit",
+        "rear door"
+      ]
+    },
+    {
+      "id": "exit_assembly_street",
+      "label": "Assembly \u00b7 street",
+      "zone": "street_assembly",
+      "assembly": true,
+      "anchor": {
+        "nx": 0.3,
+        "ny": 0.04,
+        "nz": 0.9
+      },
+      "aliases": [
+        "assembly point",
+        "assembly",
+        "the street",
+        "nw 26th street",
+        "rally point",
+        "muster point"
+      ]
+    }
+  ]
+}

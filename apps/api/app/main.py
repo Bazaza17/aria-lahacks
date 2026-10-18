@@ -15,8 +15,10 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.brand import PRODUCT_NAME
+from app.creao.mcp import mount as creao_mcp
+from app.creao.runtime import lifespan as creao_lifespan
 from app.ratelimit import limiter
-from app.routes import agent
+from app.routes import agent, live
 
 # --- Sentry --------------------------------------------------------------
 # Off unless SENTRY_DSN is set. FastAPI/Starlette and Anthropic integrations
@@ -33,7 +35,7 @@ if os.environ.get("SENTRY_DSN"):
         integrations=[LoggingIntegration(capture_sentry_logs=True)],
     )
 
-app = FastAPI(title=f"{PRODUCT_NAME} API")
+app = FastAPI(title=f"{PRODUCT_NAME} API", lifespan=creao_lifespan)
 
 # --- Rate limiting -------------------------------------------------------
 app.state.limiter = limiter
@@ -65,6 +67,7 @@ app.add_middleware(
 )
 
 app.include_router(agent.router)
+app.include_router(live.router)  # the CREAO layer: live incidents, exit tracking, command staff
 
 
 @app.get("/")
@@ -77,3 +80,8 @@ async def root():
 @limiter.exempt
 async def health():
     return {"ok": True}
+
+
+# POST /mcp for the CREAO command staff. Mounted last so every route above wins.
+if creao_mcp is not None:
+    app.mount("/", creao_mcp)

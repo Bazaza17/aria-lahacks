@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aria Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Aria web app tokens (apps/web/app/globals.css); design: Paper "Aria Live v2 — your picks"
+     (1A every person gets an arrow, 2A exit labels beside the door, 3 console with a Needs-you queue) */
+  :root {
+    --bg: #000000; --surface: #0a0a0a; --raised: #111111; --card: #161616; --accent: #ff6b00;
+    --ink: #ffffff; --soft: #d1d5db; --muted: #9ca3af; --faint: #6b7280; --line: rgba(255,255,255,0.08);
+    --line-2: rgba(255,255,255,0.16); --p1: #ef4444; --p2: #ff6b00; --p3: #f5b800; --p4: #60a5fa; --safe: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.45 Geist, ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .caps { font-family: "Geist Mono", monospace; font-size: 10px; letter-spacing: .25em; text-transform: uppercase; }
+  button, select, input { font: inherit; color: inherit; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 20px; height: 60px; padding: 0 24px; border-bottom: 1px solid var(--line); }
+  header .left, header .right { display: flex; align-items: center; gap: 14px; min-width: 0; }
+  .bname { display: flex; align-items: center; gap: 10px; } .bname i { width: 7px; height: 7px; border-radius: 99px; background: var(--accent); flex-shrink: 0; }
+  .bname select { background: transparent; border: 0; font-size: 15px; font-weight: 600; color: var(--ink); cursor: pointer; }
+  .bname select option { background: #0a0a0a; }
+  .mode { font-family: "Geist Mono"; font-size: 10px; font-weight: 700; letter-spacing: .25em; padding: 4px 9px; border-radius: 4px; white-space: nowrap; }
+  .mode.drill { background: var(--p3); color: #000; } .mode.live { background: var(--p1); color: #000; } .mode.idle { border: 1px solid var(--line-2); color: var(--muted); }
+  .sub { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tally { display: flex; align-items: baseline; gap: 18px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .tally b { font-size: 18px; font-weight: 600; margin-right: 5px; }
+  .conn { display: flex; align-items: center; gap: 8px; font-family: "Geist Mono"; font-size: 10px; letter-spacing: .25em; color: rgba(255,255,255,.5); white-space: nowrap; }
+  .conn i { width: 7px; height: 7px; border-radius: 99px; background: var(--faint); } .conn.on i { background: var(--safe); box-shadow: 0 0 8px var(--safe); }
+
+  main { display: grid; grid-template-columns: minmax(0,1fr) 440px; height: calc(100vh - 60px); }
+  .col { background: var(--surface); display: flex; flex-direction: column; min-height: 0; position: relative; }
+  .col.map { border-right: 1px solid var(--line); }
+
+  .agents { display: flex; align-items: center; gap: 14px; padding: 11px 24px; border-bottom: 1px solid rgba(255,255,255,.06); min-height: 42px; }
+  .agents .dots { display: flex; gap: 5px; } .agents .dots i { width: 7px; height: 7px; border-radius: 99px; background: #4b5563; }
+  .agents .dots i.running { background: var(--accent); box-shadow: 0 0 0 3px rgba(255,107,0,.18); } .agents .dots i.done { background: var(--safe); } .agents .dots i.failed { background: var(--p1); }
+  .agents .now { flex: 1; min-width: 0; font-size: 13px; color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agents button { background: none; border: 0; color: var(--faint); font-size: 12px; cursor: pointer; white-space: nowrap; } .agents button:hover { color: var(--ink); }
+  #staff { position: absolute; top: 42px; right: 16px; width: 380px; max-height: 70vh; overflow-y: auto; display: none; padding: 6px 18px; background: var(--card); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,.6); z-index: 6; }
+  #staff.open { display: block; }
+  .agent { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid rgba(255,255,255,.06); } .agent:first-child { border-top: 0; }
+  .agent .dot { width: 8px; height: 8px; border-radius: 99px; margin-top: 6px; flex-shrink: 0; background: #4b5563; }
+  .agent.running .dot { background: var(--accent); } .agent.done .dot { background: var(--safe); } .agent.failed .dot { background: var(--p1); }
+  .agent .name { font-size: 13px; font-weight: 600; } .agent .task { font-size: 12px; color: var(--muted); }
+
+  .floorbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 24px 0; flex-wrap: wrap; }
+  .tabs { display: flex; gap: 6px; } .tabs button { font-family: "Geist Mono"; font-size: 11px; letter-spacing: .2em; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line-2); background: transparent; color: rgba(255,255,255,.6); cursor: pointer; }
+  .tabs button.on { background: #fff; color: #000; border-color: #fff; }
+  .hint { font-size: 12px; color: var(--faint); }
+  #plan { position: relative; flex: 1; min-height: 0; }
+  .legend { display: flex; gap: 22px; align-items: center; padding: 13px 24px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .legend span { display: flex; align-items: center; gap: 7px; } .legend i { width: 9px; height: 9px; border-radius: 99px; display: inline-block; }
+
+  /* 3D map (three.js): the real building from packages/engine/venue.json, the scan under it when present */
+  #scene { position: absolute; inset: 0; } #scene canvas { display: block; }
+  #scene .labels { position: absolute; inset: 0; pointer-events: none; }
+  .noscan { position: absolute; left: 24px; bottom: 16px; max-width: 420px; font-size: 12px; line-height: 17px; color: var(--muted); pointer-events: none; }
+  .noscan b { color: var(--soft); font-weight: 500; }
+  .scanbadge { font-family: "Geist Mono"; font-size: 10px; letter-spacing: .2em; color: var(--faint); }
+  .x3 { font-family: Geist; pointer-events: none; white-space: nowrap; }
+  .x3.zone { font-size: 12px; color: #8b9098; } .x3.zone.out { color: #5f6670; }
+  .x3.exit { display: flex; flex-direction: column; align-items: center; gap: 1px; transform: translateY(-34px); }
+  .x3.exit b { font-size: 13px; font-weight: 500; color: #fff; } .x3.exit span { font-family: "Geist Mono"; font-size: 10.5px; color: #9ca3af; }
+  .x3.exit.bad b { color: #fca5a5; } .x3.exit.bad span { color: #f87171; }
+  .x3.person { pointer-events: auto; cursor: default; width: 11px; height: 11px; border-radius: 99px; background: #fff; border: 2px solid #0a0a0a; }
+  .x3.person.unconfirmed { background: #0a0a0a; border: 1.5px solid #9ca3af; }
+  .x3.person.needs_help { background: #ef4444; border: 0; box-shadow: 0 0 0 5px rgba(239,68,68,.25); }
+  .x3.pin3 { pointer-events: auto; cursor: pointer; transform: translateY(-18px); }
+  .x3.fire { font-family: "Geist Mono"; font-size: 10px; letter-spacing: .15em; color: #f87171; }
+  .pin { cursor: pointer; } .pin:hover path, .pin.sel path { stroke: #fff; stroke-width: 2.4; }
+  .person { cursor: default; }
+  @keyframes ring { from { r: 14; opacity: .6 } to { r: 34; opacity: 0 } } .ring { animation: ring 1.8s ease-out infinite; }
+  @keyframes drop { from { opacity: 0 } to { opacity: 1 } } .new { animation: drop .6s ease-out; }
+  /* 21st.dev Animated Beam (magicui), ported to plain SVG: a bright segment travels each told route
+     toward its door on the same ease-out-expo curve. pathLength="100" keeps every route in step. */
+  @keyframes beam { from { stroke-dashoffset: 16; } to { stroke-dashoffset: -100; } }
+  .beam { stroke-dasharray: 16 100; animation: beam 2.6s cubic-bezier(.16,1,.3,1) infinite; }
+  @media (prefers-reduced-motion: reduce) { .beam { animation: none; stroke-dasharray: none; opacity: .5; } .ring { animation: none; } }
+  #hover { position: absolute; display: none; flex-direction: column; gap: 6px; max-width: 300px; padding: 10px 12px; background: var(--card); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,.6); pointer-events: none; z-index: 5; font-size: 12px; color: var(--soft); }
+  #hover b { font-size: 13px; color: #fff; } #hover .said { color: var(--p3); }
+  .badges { display: flex; align-items: center; gap: 8px; }
+  .pb { font-family: "Geist Mono"; font-size: 10px; font-weight: 700; letter-spacing: .1em; color: #000; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+  .hn { font-family: "Geist Mono"; font-size: 10px; font-weight: 600; letter-spacing: .15em; color: #fca5a5; border: 1px solid rgba(239,68,68,.5); padding: 2px 6px; border-radius: 4px; }
+  .quote { font-size: 12px; line-height: 17px; color: var(--soft); padding-left: 10px; border-left: 2px solid var(--p1); }
+
+  .qhead { display: flex; align-items: baseline; justify-content: space-between; padding: 20px 24px 12px; }
+  .qhead h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em; } .qhead h2 span { color: var(--accent); margin-left: 8px; }
+  .qhead small { font-size: 12px; color: var(--faint); }
+  .scroll { overflow-y: auto; min-height: 168px; flex: 1; }
+  .comms, .log { flex-shrink: 0; }
+  #queue { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 16px; }
+  .card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; background: var(--raised); border-radius: 10px; border-left: 3px solid var(--faint); }
+  .card.fresh { animation: drop .4s ease-out; }
+  .card.row { flex-direction: row; align-items: center; gap: 12px; padding: 12px 16px; }
+  .card.p1 { background: #161010; border-color: var(--p1); } .card.route { background: #141210; border-color: var(--accent); }
+  .card.help { border-color: var(--p1); } .card.warn { border-color: var(--p3); } .card.quiet { border-color: #4b5563; }
+  .card .tag { display: flex; justify-content: space-between; align-items: center; font-family: "Geist Mono"; font-size: 10px; font-weight: 700; letter-spacing: .15em; }
+  .card.p1 .tag { color: #fca5a5; } .card.route .tag { color: #ff9a4d; } .card .tag span { font-family: Geist; font-weight: 400; letter-spacing: 0; font-size: 11px; color: var(--faint); }
+  .card .t { font-size: 15px; font-weight: 600; color: #fff; } .card.row .t { font-size: 14px; }
+  .card .s { font-size: 12.5px; line-height: 18px; color: var(--muted); } .card.row .s { font-size: 12px; }
+  .card .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn { font-family: "Geist Mono"; font-size: 11px; letter-spacing: .12em; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line-2); background: transparent; color: #e5e7eb; cursor: pointer; text-transform: uppercase; white-space: nowrap; }
+  .btn.solid { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; } .btn:hover { border-color: var(--accent); } .btn:disabled { opacity: .45; cursor: default; }
+  .calm { display: flex; flex-direction: column; gap: 4px; padding: 18px 16px; border: 1px dashed rgba(255,255,255,.1); border-radius: 10px; color: var(--faint); font-size: 13px; }
+  .calm b { color: var(--soft); font-weight: 500; }
+  /* Texts & calls (Paper 4A): reply funnel from TigerData's comms_events / comms_1m */
+  .comms { display: flex; flex-direction: column; gap: 16px; padding: 18px 24px 20px; border-top: 1px solid rgba(255,255,255,.06); }
+  .comms .ch { display: flex; justify-content: space-between; align-items: baseline; }
+  .comms .live { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--faint); } .comms .live i { width: 6px; height: 6px; border-radius: 99px; background: var(--safe); }
+  .comms .big { display: flex; gap: 32px; } .comms .big b { display: block; font-size: 34px; font-weight: 600; letter-spacing: -.02em; line-height: 38px; } .comms .big span { font-size: 12px; color: var(--muted); }
+  .funnel { display: flex; flex-direction: column; gap: 9px; }
+  .funnel .f { display: flex; align-items: center; gap: 12px; font-size: 12.5px; color: var(--soft); }
+  .funnel .f .l { width: 104px; flex-shrink: 0; } .funnel .f .n { width: 28px; flex-shrink: 0; text-align: right; font-weight: 600; color: #fff; }
+  .funnel .f .tr { flex: 1; height: 8px; border-radius: 4px; background: rgba(255,255,255,.06); } .funnel .f .tr i { display: block; height: 8px; border-radius: 4px; }
+  .callrow { display: flex; align-items: center; gap: 16px; padding: 10px 14px; border-radius: 8px; background: var(--raised); font-size: 12.5px; color: var(--muted); }
+  .callrow span { display: flex; align-items: center; gap: 7px; } .callrow b { color: #fff; font-weight: 600; } .callrow i { width: 7px; height: 7px; border-radius: 99px; display: inline-block; }
+  .log { padding: 16px 24px 12px; border-top: 1px solid rgba(255,255,255,.06); max-height: 172px; display: flex; flex-direction: column; min-height: 0; }
+  .log .lh { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 6px; }
+  .log .lh button { background: none; border: 0; color: var(--faint); font-size: 12px; cursor: pointer; } .log .lh button:hover { color: var(--ink); }
+  .log .rows { overflow-y: auto; min-height: 0; }
+  .log .r { display: flex; gap: 12px; font-size: 12.5px; line-height: 18px; padding: 4px 0; color: #e5e7eb; }
+  .log .r .tm { font-family: "Geist Mono"; font-size: 11px; color: var(--faint); width: 44px; flex-shrink: 0; padding-top: 1px; }
+  .log .r.agent { color: var(--faint); } .log .r.hazard { color: #fca5a5; } .log .r.safe { color: #86efac; }
+  .empty { font-size: 12px; color: var(--faint); }
+
+  #drawer { position: fixed; top: 60px; right: 0; bottom: 0; width: 500px; max-width: 100vw; background: var(--surface); border-left: 1px solid rgba(255,255,255,.12); box-shadow: -24px 0 48px rgba(0,0,0,.6); display: flex; flex-direction: column; transform: translateX(105%); transition: transform .22s ease; z-index: 10; }
+  #drawer.open { transform: none; }
+  .block { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+  .dh { padding: 20px 24px 18px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+  .dh h2 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 30px; } .dh .m { font-size: 13px; color: var(--muted); }
+  .x { margin-left: auto; background: none; border: 0; color: rgba(255,255,255,.5); font-size: 16px; cursor: pointer; }
+  .sec { display: flex; flex-direction: column; gap: 6px; } .sec .top { display: flex; justify-content: space-between; gap: 10px; } .sec .top b { font-size: 13px; } .sec .top span { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .sec .tx { font-size: 13px; line-height: 20px; color: var(--soft); white-space: pre-wrap; }
+  .told { padding: 12px 14px; background: var(--raised); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; } .told .tx { color: #fff; font-size: 13px; line-height: 19px; }
+  .tl .row { display: flex; gap: 12px; font-size: 13px; line-height: 18px; padding: 4px 0; } .tl .tm { font-family: "Geist Mono"; font-size: 11px; color: var(--faint); width: 60px; flex-shrink: 0; padding-top: 1px; }
+  .tl .flag { color: #fca5a5; } .tl .caller { color: #fff; } .tl .other { color: var(--soft); }
+  .dfoot { display: flex; gap: 8px; padding: 16px 24px; border-top: 1px solid var(--line); } .dfoot .btn { flex: 1; }
+  #login { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 20; }
+  #login form { width: 360px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+  #login input { background: #000; border: 1px solid var(--line-2); border-radius: 6px; padding: 9px 11px; }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr; height: auto; } .col.map { border-right: 0; }
+    #plan { flex: none; height: 70vh; } .scroll { overflow: visible; } .log { max-height: none; }
+    header { flex-wrap: wrap; height: auto; padding: 12px 16px; gap: 10px; } header .left, header .right { flex-wrap: wrap; gap: 10px; }
+    .sub, .hint { display: none; } #drawer { top: 0; width: 100vw; } #staff { left: 16px; width: auto; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="left">
+    <span class="bname"><i></i><select id="building" aria-label="Building"></select></span>
+    <span id="mode" class="mode idle">NO INCIDENT</span>
+    <span id="sub" class="sub"></span>
+  </div>
+  <div class="right">
+    <span class="tally" id="tally"></span>
+    <span id="conn" class="conn"><i></i><span id="connText">CONNECTING</span></span>
+  </div>
+</header>
+<main>
+  <section class="col map">
+    <div class="agents"><span class="caps" style="color:rgba(255,255,255,.4)">CREAO</span><span class="dots" id="agentDots"></span>
+      <span class="now" id="agentNow">Waiting for the command staff</span><button id="agentToggle" aria-expanded="false">6 agents · details</button></div>
+    <div id="staff"></div>
+    <div class="floorbar"><div style="display:flex;gap:10px;align-items:center"><div class="tabs" id="tabs"></div><span class="scanbadge" id="scanBadge"></span></div><span class="hint">Hover a person for their exit · click a pin for the report · drag to orbit</span></div>
+    <div id="plan"><div id="scene"></div><div class="noscan" id="noScan"></div><div id="hover"></div></div>
+    <div class="legend">
+      <span><i style="background:#fff"></i>On the move</span>
+      <span><i style="border:1.5px solid var(--muted)"></i>No reply</span>
+      <span><i style="background:var(--p1)"></i>Needs help</span>
+      <span><svg width="24" height="6"><line x1="0" y1="3" x2="24" y2="3" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/><line x1="12" y1="3" x2="22" y2="3" stroke="var(--safe)" stroke-width="2.5" stroke-linecap="round"/></svg>Told exit (pulse moves to the door)</span>
+      <span><svg width="24" height="6"><line x1="0" y1="3" x2="24" y2="3" stroke="var(--p3)" stroke-width="1.5" stroke-dasharray="4 3"/></svg>Says a different exit</span>
+    </div>
+  </section>
+  <section class="col">
+    <div class="qhead"><h2>Needs you<span id="qCount"></span></h2><small>Most urgent first</small></div>
+    <div class="scroll"><div id="queue"></div></div>
+    <div class="comms" id="comms"></div>
+    <div class="log"><div class="lh"><span class="caps" style="color:rgba(255,255,255,.4)">LOG</span><button id="logToggle">Show agent steps</button></div><div class="rows" id="log"></div></div>
+  </section>
+</main>
+<aside id="drawer" aria-label="Incident report"></aside>
+<div id="login"><form id="loginForm">
+  <b>Dispatcher key</b><span style="font-size:12px;color:var(--muted)">From DISPATCH_API_KEYS in apps/api/.env. Kept in this browser only.</span>
+  <input id="key" type="password" autocomplete="off" required><input id="me" placeholder="Your initials" value="AP" required>
+  <button class="btn solid" type="submit">Open Aria Live</button>
+</form></div>
+<script>
+const PRI = { P1: "#ef4444", P2: "#ff6b00", P3: "#f5b800", P4: "#60a5fa" };
+const CHASE_SECS = 60;  // the messenger calls anyone silent this long after the alert (dispatch.CHASE_AFTER)
+const S = { key: localStorage.getItem("ariaKey") || "", me: localStorage.getItem("ariaMe") || "AP", b: null, profile: null,
+            s: null, staff: null, floor: 1, seen: new Set(), drawn: new Set(), qseen: new Set(), retexted: {}, open: null, es: null, agentSteps: false };
+const $ = (id) => document.getElementById(id);
+const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const hhmmss = (iso) => (iso || "").slice(11, 19);
+const ago = (iso) => { const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000); return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)} min` : hhmmss(iso); };
+const clock = (iso) => { if (!S.started) return hhmmss(iso); const s = Math.max(0, (Date.parse(iso) - S.started) / 1000); return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`; };
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", Authorization: `Bearer ${S.key}`, ...(opts.headers || {}) } });
+  if (r.status === 401) { $("login").style.display = "flex"; throw new Error("unauthorized"); }
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+$("loginForm").onsubmit = (e) => { e.preventDefault(); S.key = $("key").value.trim(); S.me = $("me").value.trim() || "AP";
+  localStorage.setItem("ariaKey", S.key); localStorage.setItem("ariaMe", S.me); $("login").style.display = "none"; start(); };
+
+// ------------------------------------------------------------------ live data (streamed out of TigerData)
+let t = null;
+const soon = () => { clearTimeout(t); t = setTimeout(refresh, 250); };
+async function refresh() {
+  if (!S.b) return;
+  try {
+    const [s, staff] = await Promise.all([api(`/live/buildings/${S.b}/situation`), api(`/live/buildings/${S.b}/staff`)]);
+    S.s = s; S.staff = staff; render();
+    if (S.open) openReport(S.open, true);
+  } catch (e) { console.warn(e); }
+}
+function connect() {
+  if (S.es) S.es.close();
+  const es = (S.es = new EventSource(`/live/stream?building_id=${S.b}&token=${encodeURIComponent(S.key)}`));
+  es.onopen = () => { $("conn").classList.add("on"); $("connText").textContent = "LIVE"; };
+  es.onerror = () => { $("conn").classList.remove("on"); $("connText").textContent = "RECONNECTING"; };
+  ["incident.updated", "incident.event", "roll_call.changed", "roll_call.registered", "hazard.reported", "route.proposed", "route.approved",
+   "route.rejected", "evacuation.started", "evacuation.ended", "handoff.requested", "handoff.joined", "agent.activity", "report.updated",
+   "fire_model.updated", "occupant.message", "occupant.call_requested", "handoff.transferred", "comms.event"].forEach((k) => es.addEventListener(k, soon));
+}
+
+// ------------------------------------------------------------------ markers (drawn over the 3D scan)
+function floorOf(anchor) {
+  const fl = S.profile.floors; return fl.reduce((b, f) => (Math.abs(f.ny - anchor.ny) < Math.abs(b.ny - anchor.ny) ? f : b), fl[0]).level;
+}
+const PIN = "M15 39C15 39 28 24.5 28 15C28 7.8 22.2 2 15 2C7.8 2 2 7.8 2 15C2 24.5 15 39 15 39Z";
+const exitById = (id) => S.s.exits.find((e) => e.id === id);
+const shortLabel = (l) => String(l || "").replace(/\s*\(.*\)$/, "");
+function hash(str) { let h = 2166136261; for (const c of String(str)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; }
+function place(el, h) {
+  const plan = $("plan").getBoundingClientRect(), r = el.getBoundingClientRect();
+  h.style.display = "flex";
+  const cx = r.left - plan.left + r.width / 2, cy = r.top - plan.top + r.height / 2;
+  const left = cx + h.offsetWidth + 24 > plan.width ? cx - h.offsetWidth - 16 : cx + 16;
+  h.style.left = `${Math.max(8, left)}px`; h.style.top = `${Math.min(plan.height - h.offsetHeight - 8, Math.max(8, cy - 20))}px`;
+}
+function showPerson(id, el) {
+  const pp = S.s.people.find((x) => x.id === id); if (!pp) return;
+  const told = exitById(pp.told_exit_id), said = exitById(pp.said_exit_id);
+  const state = { contacted: "Replied", unconfirmed: pp.no_reply_secs != null ? `No reply for ${Math.round(pp.no_reply_secs / 60)} min` : "No reply", needs_help: "Needs help · told to stay put" }[pp.status] || pp.status;
+  $("hover").innerHTML = `<b>${esc(pp.name)}${pp.place ? " · " + esc(shortLabel(pp.place)) : ""}</b><span>${esc(state)}${pp.mobility.length ? " · " + esc(pp.mobility.join(", ")) : ""}</span>
+    ${told ? `<span>Told: ${esc(shortLabel(told.label))}${told.unsafe ? " (now unsafe)" : ""}</span>` : ""}
+    ${said ? `<span class="said">Says: ${esc(shortLabel(said.label))}${said.unsafe ? " (unsafe)" : ""}</span>` : ""}`;
+  place(el, $("hover"));
+}
+function showPin(id, el) {
+  const i = S.s.incidents.find((x) => x.id === id); if (!i) return;
+  const human = i.handoff && i.handoff.status !== "resolved";
+  const said = i.facts?.description && i.facts.description !== i.headline ? i.facts.description.slice(0, 140) : "";
+  $("hover").innerHTML = `<div class="badges"><span class="pb" style="background:${PRI[i.priority]}">${i.priority}</span>${human ? `<span class="hn">${i.handoff.status === "joined" ? "DISPATCHER ON" : "HUMAN NEEDED"}</span>` : ""}<span style="flex:1"></span><span style="color:var(--faint)">${ago(i.started_at)}</span></div>
+    <b style="font-size:14px;line-height:19px">${esc(i.headline)}</b><span style="color:var(--muted)">${esc(i.location.label || "Position unknown")} · ${i.channel === "sms" ? "text thread" : "call"}</span>
+    ${said ? `<div class="quote" style="border-color:${PRI[i.priority]}">${esc(said)}</div>` : ""}<span class="caps" style="color:var(--accent);letter-spacing:.2em">Open CREAO report →</span>`;
+  place(el, $("hover"));
+}
+function hideHover() { $("hover").style.display = "none"; }
+
+// ------------------------------------------------------------------ Needs you (the dispatcher's queue)
+function queue() {
+  const s = S.s, out = [], inc = Object.fromEntries(s.incidents.map((i) => [i.id, i]));
+  const exitL = (id) => shortLabel(exitById(id)?.label || id);
+  for (const i of s.incidents.filter((x) => x.status === "active" && x.handoff?.status === "requested")) {
+    const said = i.facts?.description && i.facts.description !== i.headline ? `“${i.facts.description.slice(0, 90)}” · ` : "";
+    out.push({ key: `h:${i.id}`, kind: "p1", tag: `${i.priority} · HUMAN NEEDED`, at: i.handoff.requested_at || i.started_at, title: i.headline,
+      sub: `${said}${i.location.label || "Position unknown"} · ${i.channel === "sms" ? "text thread" : "call"}`,
+      actions: [["Join thread", `joinHandoff('${i.id}',this)`, true], [i.assigned_unit ? esc(i.assigned_unit) : "Send crew", `assignCrew('${i.id}',this)`], ["Report", `openReport('${i.id}')`]] });
+  }
+  // ElevenLabs heard a trigger word and moved the call to the dispatcher's phone
+  for (const i of s.incidents.filter((x) => x.status === "active" && x.handoff?.status === "transferred")) {
+    const why = (i.handoff.reasons || []).slice(-1)[0] || "trigger word";
+    out.push({ key: `t:${i.id}`, kind: "p1", tag: `${i.priority} · ON DISPATCHER LINE`, at: i.handoff.transferred_at || i.started_at, title: i.headline,
+      sub: `${i.location.label || "Position unknown"} · ${why.replace(/^call moved to dispatcher /, "ElevenLabs moved the call ")}`,
+      actions: [["Report", `openReport('${i.id}')`, true], ["Resolved", `resolveHandoff('${i.id}',this)`]] });
+  }
+  for (const r of s.route_proposals.filter((x) => x.status === "proposed"))
+    out.push({ key: `r:${r.id}`, kind: "route", tag: "ROUTE CHANGE · APPROVE", at: r.created_at, title: `${shortLabel(r.zone_label)} → ${shortLabel(r.to_exit_label)}`,
+      sub: `${r.rationale} Proposed by ${r.proposed_by.replace("creao:", "the ").replace(/_/g, " ")}.`,
+      actions: [[`Approve · text ${r.affected}`, `decide('${r.id}','approve',this)`, true], ["Reject", `decide('${r.id}','reject',this)`]] });
+  for (const pp of s.people.filter((x) => x.status === "needs_help")) {
+    const i = inc[pp.incident_id]; if (i && (i.handoff?.status === "requested" || i.assigned_unit)) continue;
+    out.push({ key: `n:${pp.id}`, kind: "help", row: true, title: `${pp.name} needs help${pp.mobility.length ? " · " + pp.mobility.join(", ") : ""}`, sub: `${shortLabel(pp.place) || "Position unknown"} · told to stay put`,
+      actions: [i ? ["Assign crew", `assignCrew('${i.id}',this)`] : ["Call", `callPeople(['${pp.id}'],this)`]] });
+  }
+  for (const pp of s.people.filter((x) => x.heading_unsafe && !(Date.now() - (S.retexted[x.id] || 0) < 120000)))
+    out.push({ key: `u:${pp.id}`, kind: "warn", row: true, title: `${pp.name} is heading to an unsafe exit`, sub: `Told ${pp.told_exit_id ? exitL(pp.told_exit_id) : "another exit"} · says ${exitL(pp.said_exit_id)}`,
+      actions: [["Re-text", `retext('${pp.id}',this)`]] });
+  const silent = s.people.filter((x) => x.status === "unconfirmed" && x.no_reply_secs != null && !x.call_requested);
+  if (silent.length) {
+    const wait = Math.max(0, CHASE_SECS - Math.max(...silent.map((x) => x.no_reply_secs)));
+    const names = silent.slice(0, 3).map((x) => x.name).join(", ") + (silent.length > 3 ? ` +${silent.length - 3}` : "");
+    out.push({ key: "silent", kind: "quiet", row: true, title: `${silent.length} haven't replied`, sub: `${names} · ${wait ? `auto-call in 0:${String(wait).padStart(2, "0")}` : "calling shortly"}`,
+      actions: [["Call now", `callPeople(${JSON.stringify(silent.map((x) => x.id)).replace(/"/g, "'")},this)`]] });
+  }
+  return out;
+}
+function renderQueue() {
+  const q = queue();
+  $("qCount").textContent = q.length ? q.length : "";
+  const btn = ([label, on, solid]) => `<button class="btn ${solid ? "solid" : ""}" onclick="${on}">${label}</button>`;
+  const fresh = (c) => (S.qseen.has(c.key) ? "" : "fresh");  // only new cards animate in
+  $("queue").innerHTML = q.length ? q.map((c) => c.row
+    ? `<div class="card row ${c.kind} ${fresh(c)}"><div class="grow"><div class="t">${esc(c.title)}</div><div class="s">${esc(c.sub)}</div></div>${c.actions.map(btn).join("")}</div>`
+    : `<div class="card ${c.kind} ${fresh(c)}"><div class="tag">${esc(c.tag)}<span>${ago(c.at)}</span></div><div class="grow"><div class="t">${esc(c.title)}</div><div class="s">${esc(c.sub)}</div></div><div class="btns">${c.actions.map(btn).join("")}</div></div>`).join("")
+    : `<div class="calm"><b>Nothing needs you right now.</b>${S.s.evacuation ? "Route changes, people asking for help and anyone silent will show up here." : "No evacuation is running."}</div>`;
+}
+function markQueueSeen() { queue().forEach((c) => S.qseen.add(c.key)); }
+// Texts & calls (Paper 4A): who answered the alert, how fast, how many are out, and the calls
+function renderComms() {
+  const c = S.s.comms, rc = S.s.roll_call;
+  if (!c || !S.s.evacuation || !c.alerted) { $("comms").innerHTML = `<div class="ch"><span class="caps" style="color:rgba(255,255,255,.4)">TEXTS &amp; CALLS</span></div><div class="empty">Starts when the alert goes out.</div>`; return; }
+  const out = rc.confirmed_safe || 0, moving = (rc.contacted || 0) + out;
+  const rows = [["Alerted", c.alerted, "#9ca3af"], ["Replied", c.replied, "#d1d5db"], ["Heading out", moving, "#ffffff"], ["Confirmed out", out, "#22c55e"]];
+  const bar = ([l, n, col]) => `<div class="f"><span class="l">${l}</span><span class="tr"><i style="width:${Math.min(100, (n / c.alerted) * 100).toFixed(1)}%;background:${col}"></i></span><span class="n" ${l === "Confirmed out" ? 'style="color:#22c55e"' : ""}>${n}</span></div>`;
+  const rate = c.reply_rate == null ? "–" : `${Math.round(c.reply_rate * 100)}%`;
+  $("comms").innerHTML = `<div class="ch"><span class="caps" style="color:rgba(255,255,255,.4)">TEXTS &amp; CALLS</span><span class="live" title="${esc(c.source)}"><i></i>TigerData · live</span></div>
+    <div class="big"><div><b>${rate}</b><span>replied · ${c.replied} of ${c.alerted}</span></div><div><b>${c.median_reply_secs == null ? "–" : c.median_reply_secs + "s"}</b><span>median first reply</span></div></div>
+    <div class="funnel">${rows.map(bar).join("")}</div>
+    <div class="callrow"><span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><b>${c.calls}</b>calls</span>
+      <span><i style="background:#fff"></i><b>${c.active_calls}</b>live now</span><span><i style="background:var(--accent)"></i><b style="color:#ff9a4d">${c.transfers}</b>to dispatcher</span></div>`;
+}
+function renderLog() {
+  const rows = (S.s.log || []).map((r) => ({ ...r }));
+  if (S.agentSteps) rows.push(...(S.staff?.activity || []).slice(0, 40).map((a) => ({ at: a.at, kind: "agent", text: a.text })));
+  rows.sort((a, b) => (a.at < b.at ? 1 : -1));
+  $("log").innerHTML = rows.slice(0, 60).map((r) => `<div class="r ${r.kind}"><span class="tm">${clock(r.at)}</span><span>${esc(r.text)}</span></div>`).join("") || `<div class="empty">Nothing yet.</div>`;
+}
+function renderAgents() {
+  const roles = S.staff?.roles || [];
+  $("agentDots").innerHTML = roles.map((r) => `<i class="${r.deployed ? r.status : ""}" title="${esc(r.title)}"></i>`).join("");
+  const busy = roles.find((r) => r.status === "running"), last = roles.filter((r) => r.last_summary).sort((a, b) => ((a.last_at || "") < (b.last_at || "") ? 1 : -1))[0];
+  $("agentNow").textContent = busy ? `${busy.title}: ${busy.last_task || "working"}` : last ? `${last.title}: ${last.last_summary}` : "Waiting for the command staff";
+  $("agentToggle").textContent = `${roles.length} agents · details`;
+  $("staff").innerHTML = roles.map((r) => `<div class="agent ${r.deployed ? r.status : ""}"><span class="dot"></span><div style="min-width:0"><div class="name">${esc(r.title)}</div><div class="task">${esc(r.last_summary || r.last_task || r.does)}</div></div></div>`).join("");
+}
+
+// ------------------------------------------------------------------ render
+// The map: the 3D scan with the live markers over it
+function drawPlace() { window.Scene3D?.update(); }
+function render() {
+  const s = S.s, ev = s.evacuation, rc = s.roll_call;
+  $("mode").className = `mode ${ev ? ev.mode : "idle"}`; $("mode").textContent = ev ? ev.mode.toUpperCase() : "NO INCIDENT";
+  S.started = ev ? Date.parse(ev.started_at) : null; S.origin = ev ? shortLabel(ev.origin_label) : null;
+  $("tally").innerHTML = [["confirmed_safe", "out", "#22c55e"], ["contacted", "moving", "#fff"], ["needs_help", "need help", "#ef4444"], ["unconfirmed", "no reply", "#9ca3af"]]
+    .map(([k, l, c]) => `<span><b style="color:${c}">${rc[k] || 0}</b>${l}</span>`).join("");
+  const onFloor = (lv) => s.people.filter((x) => x.anchor && x.status !== "confirmed_safe" && floorOf(x.anchor) === lv).length;
+  document.querySelectorAll("#tabs button").forEach((b) => { const lv = +b.dataset.f, n = onFloor(lv); b.textContent = `${b.dataset.label}${n ? " · " + n : ""}`; });
+  renderAgents(); renderQueue(); markQueueSeen(); renderComms(); renderLog(); drawPlace();
+}
+
+// ------------------------------------------------------------------ actions
+async function post(path, body, btn) {
+  if (btn) btn.disabled = true;
+  try { return await api(path, { method: "POST", body: JSON.stringify({ dispatcher: S.me, ...body }) }); }
+  catch (e) { alert(e.message.includes("stale") ? "The hazard picture changed; review the new proposal." : e.message); }
+  finally { refresh(); }
+}
+const decide = (id, decision, btn) => post(`/live/route-proposals/${id}/decision`, { decision }, btn);
+const joinHandoff = (id, btn) => post(`/live/incidents/${id}/handoff/join`, {}, btn);
+const resolveHandoff = (id, btn) => post(`/live/incidents/${id}/handoff/resolve`, {}, btn);
+function assignCrew(id, btn) { const u = prompt("Unit or crew sent (e.g. Engine 7)"); if (u) post(`/live/incidents/${id}/assign`, { unit: u }, btn); }
+function retext(id, btn) { S.retexted[id] = Date.now(); post(`/live/occupants/${id}/retext`, {}, btn); }
+async function callPeople(ids, btn) { if (btn) btn.disabled = true; for (const id of ids) await post(`/live/occupants/${id}/call`, {}); }
+$("agentToggle").onclick = () => { const o = $("staff").classList.toggle("open"); $("agentToggle").setAttribute("aria-expanded", o); };
+$("logToggle").onclick = () => { S.agentSteps = !S.agentSteps; $("logToggle").textContent = S.agentSteps ? "Hide agent steps" : "Show agent steps"; renderLog(); };
+
+// ------------------------------------------------------------------ incident report (from CREAO)
+async function openReport(id, quiet) {
+  S.open = id; hideHover();
+  let r; try { r = await api(`/live/incidents/${id}/report`); } catch (e) { return; }
+  const i = r.incident, pr = r.person, human = r.handoff && r.handoff.status !== "resolved";
+  const sections = [
+    ...r.creao.notes.map((n) => ({ title: "Staff note", by: n.text.split(":")[0], at: n.at, text: n.text.split(":").slice(1).join(":").trim() || n.text })),
+    ...r.creao.actions.map((a) => ({ title: "Agent action", by: a.role, at: a.at, text: a.text })),
+    ...r.creao.sections.filter((x) => ["responders", "hazards", "people", "overview"].includes(x.section)).map((x) => ({ title: x.title, by: x.by, at: x.at, text: x.text })),
+  ];
+  const brief = r.handoff?.brief;
+  $("drawer").innerHTML = `<div class="dh"><div class="badges"><span class="pb" style="background:${PRI[i.priority]}">${i.priority}</span>
+      ${human ? `<span class="hn">${r.handoff.status === "joined" ? "DISPATCHER ON · " + esc(r.handoff.joined_by || "") : "HUMAN NEEDED"}</span>` : ""}
+      <button class="x" onclick="closeReport()" aria-label="Close">✕</button></div>
+      <h2>${esc(i.headline)}</h2>
+      <div class="m">${esc(pr.name || i.caller || "Unknown caller")} · ${esc(i.location?.label || "Position unknown")} · ${i.channel === "sms" ? "text thread" : "call"} since ${hhmmss(i.started_at)}${pr.mobility?.length ? " · " + esc(pr.mobility.join(", ")) : ""}</div></div>
+    <div class="scroll">
+      <div class="block" style="gap:18px"><div class="caps" style="color:var(--accent)">CREAO INCIDENT REPORT</div>
+        ${brief ? `<div class="sec"><div class="top"><b>Handoff brief</b><span>Aria · ${hhmmss(r.handoff.requested_at)}</span></div><div class="tx">${esc(brief.summary)}${brief.condition ? "\nCondition: " + esc(brief.condition) : ""}${brief.unknowns?.length ? "\nStill unknown: " + esc(brief.unknowns.join(", ")) : ""}</div></div>` : ""}
+        ${sections.length ? sections.map((x) => `<div class="sec"><div class="top"><b>${esc(x.title)}</b><span>${esc(x.by)} · ${hhmmss(x.at)}</span></div><div class="tx">${esc(x.text)}</div></div>`).join("")
+          : `<div class="empty">The CREAO staff hasn't written about this incident yet.</div>`}
+        ${pr.last_instruction ? `<div class="told"><div class="caps" style="color:rgba(255,255,255,.45)">LAST TOLD BY TEXT</div><div class="tx">${esc(pr.last_instruction)}</div></div>` : ""}
+      </div>
+      <div class="block tl" style="border-bottom:0"><div class="caps" style="color:rgba(255,255,255,.4)">TIMELINE · TIGERDATA</div>
+        ${r.timeline.slice(-14).map((e) => `<div class="row"><span class="tm">${hhmmss(e.at)}</span><span class="${e.kind === "flag" ? "flag" : e.role === "caller" ? "caller" : "other"}">${e.role === "caller" ? "“" + esc(e.text) + "”" : esc(e.text)}</span></div>`).join("")}
+      </div>
+    </div>
+    <div class="dfoot">
+      ${human && r.handoff.status === "requested" ? `<button class="btn solid" onclick="act('handoff/join')">Join · take over</button>` : human ? `<button class="btn solid" onclick="act('handoff/resolve')">Resolve handoff</button>` : `<button class="btn solid" onclick="act('acknowledge')" ${i.acknowledged_by ? "disabled" : ""}>${i.acknowledged_by ? "Acknowledged · " + esc(i.acknowledged_by) : "Acknowledge"}</button>`}
+      <button class="btn" onclick="assign()">${i.assigned_unit ? esc(i.assigned_unit) : "Assign unit"}</button>
+    </div>`;
+  $("drawer").classList.add("open");
+  if (!quiet) render();
+}
+function closeReport() { S.open = null; $("drawer").classList.remove("open"); render(); }
+const act = (what, unit) => post(`/live/incidents/${S.open}/${what}`, { unit });
+function assign() { const u = prompt("Unit or crew sent (e.g. Engine 7)"); if (u) act("assign", u); }
+Object.assign(window, { openReport, closeReport, act, assign, decide, joinHandoff, resolveHandoff, assignCrew, retext, callPeople });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (S.open) closeReport(); $("staff").classList.remove("open"); } });
+setInterval(() => {
+  if (!S.started) { $("sub").textContent = ""; return; }
+  const s = Math.max(0, (Date.now() - S.started) / 1000);
+  $("sub").textContent = `Fire in the ${S.origin} · ${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")} since declared`;
+}, 1000);
+setInterval(() => { if (S.s) { renderQueue(); markQueueSeen(); } }, 5000);  // keeps the auto-call countdown moving
+
+// ------------------------------------------------------------------ start
+async function selectBuilding(id) {
+  S.b = id; S.seen = new Set(); S.drawn = new Set(); S.open = null; $("drawer").classList.remove("open");
+  S.profile = await api(`/live/buildings/${id}`);
+  window.Scene3D?.setBuilding?.();
+  const levels = S.profile.floors.map((f) => f.level); if (!levels.includes(S.floor)) S.floor = levels[0];
+  $("tabs").innerHTML = S.profile.floors.map((f) => `<button data-f="${f.level}" data-label="${esc(f.label.toUpperCase())}" class="${f.level === S.floor ? "on" : ""}">${esc(f.label.toUpperCase())}</button>`).join("");
+  document.querySelectorAll("#tabs button").forEach((b) => (b.onclick = () => { S.floor = +b.dataset.f; document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("on", x === b)); if (S.s) render(); window.Scene3D?.floorChanged?.(); }));
+  history.replaceState(null, "", `?building=${id}`);
+  connect(); refresh();
+}
+async function start() {
+  if (!S.key) { $("login").style.display = "flex"; return; }
+  try {
+    const list = await api("/live/buildings");
+    const want = new URLSearchParams(location.search).get("building") || (list.find((b) => b.default) || list[0]).id;
+    $("building").innerHTML = list.map((b) => `<option value="${b.id}" ${b.id === want ? "selected" : ""}>${esc(b.name)}</option>`).join("");
+    $("building").onchange = (e) => selectBuilding(e.target.value);
+    await selectBuilding(want);
+  } catch (e) { console.warn(e); }
+}
+start();
+</script>
+<script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+// 3D map: the team's scan, loaded exactly as exported, with the live markers overlaid (1A arrows with
+// the 21st.dev beam, 2A door labels, pins, fire). Markers sit in the venue frame (room 2's scan x, z,
+// metres; packages/engine/venue.json); each scan file is placed in it by its recorded transform.
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
+import { Line2 } from "three/addons/lines/Line2.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineGeometry } from "three/addons/lines/LineGeometry.js";
+
+const el = document.getElementById("scene");
+let renderer, labels, scene, camera, controls, liveGroup, scanGroup, ground, scanBox = null, scanFor = null, fitted = false;
+const lineMats = [], beams = [];
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+} catch (e) { console.warn("WebGL unavailable; the plan stays", e); }
+if (renderer) {
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+  renderer.setClearColor(0x050505);
+  el.appendChild(renderer.domElement);
+  labels = new CSS2DRenderer(); labels.domElement.className = "labels"; el.appendChild(labels.domElement);
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x050505, 120, 260);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x202020, 1.1));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(-30, 80, 40); scene.add(sun);
+  camera = new THREE.PerspectiveCamera(40, 1, 0.5, 600);
+  controls = new OrbitControls(camera, labels.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.08; controls.maxPolarAngle = Math.PI * 0.47;
+  liveGroup = new THREE.Group(); scanGroup = new THREE.Group();
+  ground = new THREE.GridHelper(120, 60, 0x2a2a2a, 0x161616);  // only until the scan is in
+  scene.add(scanGroup, ground, liveGroup);
+  new ResizeObserver(size).observe(el);
+  let last = performance.now();
+  renderer.setAnimationLoop((t) => {
+    const dt = (t - last) / 1000; last = t;
+    for (const b of beams) b.material.dashOffset -= dt * 9;  // the pulse travels toward the door
+    controls.update(); renderer.render(scene, camera); labels.render(scene, camera);
+  });
+}
+function size() {
+  const w = el.clientWidth || 1, h = el.clientHeight || 1;
+  renderer.setSize(w, h); labels.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  for (const m of lineMats) m.resolution.set(w, h);
+}
+const F = () => S.profile.frame;
+// anchors are normalized in the building frame; the scene is in metres (x, elevation, z)
+function world(a, lift = 0) {
+  const f = F(), x = f.x0 + a.nx * (f.x1 - f.x0), z = f.flip_z ? f.z1 - a.nz * (f.z1 - f.z0) : f.z0 + a.nz * (f.z1 - f.z0);
+  return new THREE.Vector3(x, f.y0 + a.ny * (f.y1 - f.y0) + lift, z);
+}
+const storeyOfLevel = (lv) => ({ 1: "1F", 2: "2F", 3: "3F" }[lv] || "1F");
+function clear(g) { for (const c of [...g.children]) { g.remove(c); c.traverse?.((o) => { o.geometry?.dispose?.(); if (o.element) o.element.remove(); }); } }
+function label(html, cls, pos) { const d = document.createElement("div"); d.className = `x3 ${cls}`; d.innerHTML = html; const o = new CSS2DObject(d); o.position.copy(pos); return o; }
+function line(points, color, width, opts = {}) {
+  const g = new LineGeometry(); g.setPositions(points.flatMap((v) => [v.x, v.y, v.z]));
+  const m = new LineMaterial({ color, linewidth: width, transparent: true, opacity: opts.opacity ?? 1, dashed: !!opts.dash, dashSize: opts.dash?.[0] ?? 1, gapSize: opts.dash?.[1] ?? 1, depthWrite: false });
+  m.resolution.set(el.clientWidth || 1, el.clientHeight || 1); lineMats.push(m);
+  const l = new Line2(g, m); l.computeLineDistances(); return l;
+}
+
+function fitCamera() {  // frame the scan (or the markers, until it's in), north-up, Founders' Patio nearest
+  let box = scanBox;
+  if (!box) {
+    box = new THREE.Box3();
+    for (const z of S.profile.zones.filter((z) => z.floor === S.floor)) box.expandByPoint(world(z.anchor));
+    for (const e of S.profile.exits.filter((e) => !e.assembly && floorOf(e.anchor) === S.floor)) box.expandByPoint(world(e.anchor));
+  }
+  const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3()), y = S.floor === 2 ? 5 : 0;
+  // far enough that the whole scan fits the panel's shape (width and depth), with a little margin
+  const fov = THREE.MathUtils.degToRad(camera.fov), need = (Math.max(30, sz.z, sz.x / camera.aspect) / (2 * Math.tan(fov / 2))) * 1.08;
+  controls.target.set(c.x, y, c.z);
+  camera.position.set(c.x + need * 0.03, y + need * 0.95, c.z + need * 0.3);  // steep: into the rooms
+  controls.update(); fitted = true;
+}
+async function loadScan() {
+  scanFor = S.b; scanBox = null; clear(scanGroup); ground.visible = true;
+  const badge = document.getElementById("scanBadge"), note = document.getElementById("noScan");
+  badge.textContent = ""; note.innerHTML = "";
+  const placed = (S.profile.scans || []).map((x) => ({ ...x, url: `/live/scans/${x.file}` }));
+  // scan_url (uploaded) first, placed like the four-room file; then any local copies
+  const sources = (S.profile.scan_url ? [{ ...(placed[0] || {}), url: S.profile.scan_url }] : []).concat(placed);
+  for (const src of sources) {
+    try {
+      // the dispatcher key only goes to our own /live/scans; a public scan_url (Supabase) gets no header
+      const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+      if (src.url.startsWith("/live/")) loader.setRequestHeader({ Authorization: `Bearer ${S.key}` });
+      const gltf = await loader.loadAsync(src.url);
+      const g = gltf.scene;  // the scan as exported; only placed in the venue frame
+      g.rotation.y = THREE.MathUtils.degToRad(src.rotate_y_deg || 0);
+      g.position.set(src.x || 0, src.y || 0, src.z || 0);
+      scanGroup.add(g); g.updateMatrixWorld(true);
+      scanBox = new THREE.Box3().setFromObject(g); ground.visible = false; fitCamera();
+      badge.textContent = `SCAN · ${src.file || "scan_url"}`; return;
+    } catch (e) { /* not there: try the next file */ }
+  }
+  note.innerHTML = "<b>3D scan not loaded.</b> It isn't on GitHub yet: put <b>venue_4rooms_web.glb</b> in apps/web/public/scans/ (or set the venue's scan_url) and it appears here under the markers.";
+}
+
+const COLOR = { open: 0x22c55e, predicted: 0xf5b800, bad: 0xef4444 };
+function update() {
+  if (!renderer || !S.profile?.frame) return;
+  if (scanFor !== S.b) loadScan();
+  size();
+  if (!fitted) fitCamera();
+  clear(liveGroup); beams.length = 0;
+  for (let i = lineMats.length - 1; i >= 0; i--) if (!lineMats[i].userData.shell) lineMats.splice(i, 1);  // last update's lines are gone
+  const s = S.s, p = S.profile, fl = S.floor;
+  const onFloor = (a) => a && floorOf(a) === fl;
+  // fire model (simulation)
+  const now = s.evacuation?.minute_now ?? 0;
+  for (const st of (s.fire_model?.steps || []).filter((x) => x.minute <= now + 0.01 && onFloor(x.anchor))) {
+    const c = world(st.anchor, 0.06);
+    const glow = new THREE.Mesh(new THREE.CircleGeometry(5, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.18, depthWrite: false }));
+    glow.position.copy(c); liveGroup.add(glow);
+    liveGroup.add(label(esc(st.kind.toUpperCase()), "fire", c.clone().add(new THREE.Vector3(0, 0.5, 0))));
+  }
+  // doors (2A): a bar on the wall in its state's color, the name and its status beside it
+  for (const e of s.exits) {
+    if (!onFloor(e.anchor)) continue;
+    const c = world(e.anchor);
+    if (e.assembly) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 }));
+      ring.position.copy(c).add(new THREE.Vector3(0, 0.05, 0)); liveGroup.add(ring);
+      liveGroup.add(label(`<b>${esc(shortLabel(e.label))}</b><span style="color:#22c55e">${s.roll_call.confirmed_safe || 0} out · assembly</span>`, "exit", c.clone().add(new THREE.Vector3(0, 0.4, 0))));
+      continue;
+    }
+    const col = e.unsafe ? (e.status === "predicted" ? COLOR.predicted : COLOR.bad) : COLOR.open;
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.2, 1.4), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.35 }));
+    bar.position.copy(c).add(new THREE.Vector3(0, 1.1, 0)); liveGroup.add(bar);
+    if (e.unsafe) { const r = new THREE.Mesh(new THREE.RingGeometry(2.4, 2.7, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.5 })); r.position.copy(c).add(new THREE.Vector3(0, 0.05, 0)); liveGroup.add(r); }
+    const why = (e.reasons[0] || "unsafe").split(/[;(]/)[0].trim().toLowerCase();
+    const note = e.unsafe ? (e.status === "predicted" ? `fire by min ${e.predicted_minute}` : `${why} · avoid`).slice(0, 34) : `${e.heading} heading${e.safe ? ` · ${e.safe} out` : ""}`;
+    liveGroup.add(label(`<b>${esc(shortLabel(e.label))}</b><span>${esc(note)}</span>`, `exit ${e.unsafe ? "bad" : ""}`, c.clone().add(new THREE.Vector3(0, 2.4, 0))));
+  }
+  // people (1A): an arc to the exit they were told (the beam travels it), dashed amber to the one they named
+  for (const pp of s.people) {
+    if (!pp.anchor || pp.status === "confirmed_safe" || !onFloor(pp.anchor)) continue;
+    const a = hash(pp.id) * Math.PI * 2, r = 1 + hash(pp.id + "r") * 2.6;
+    const at = world(pp.anchor, 0.5).add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+    const arc = (to, lift) => { const mid = at.clone().lerp(to, 0.5).add(new THREE.Vector3(0, lift, 0)); return new THREE.QuadraticBezierCurve3(at, mid, to).getPoints(28); };
+    const told = pp.told_exit_id && exitById(pp.told_exit_id), said = pp.said_exit_id && exitById(pp.said_exit_id);
+    if (said && onFloor(said.anchor)) liveGroup.add(line(arc(world(said.anchor, 0.6), 2.2), 0xf5b800, 2, { dash: [0.7, 0.6] }));
+    if (told && floorOf(told.anchor) === fl) {
+      const pts = arc(world(told.anchor, 0.6), 2.8), moving = pp.status === "contacted";
+      liveGroup.add(line(pts, told.unsafe ? 0xef4444 : 0xffffff, 1.6, { opacity: told.unsafe ? 0.6 : moving ? 0.45 : 0.22, dash: told.unsafe ? [0.3, 0.5] : null }));
+      if (moving && !told.unsafe) { const b = line(pts, 0x22c55e, 3, { dash: [2.2, 26] }); b.material.dashOffset = -hash(pp.id) * 28; beams.push(b); liveGroup.add(b); }
+      const end = pts[pts.length - 1], dir = end.clone().sub(pts[pts.length - 3]).normalize();
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1, 12), new THREE.MeshBasicMaterial({ color: told.unsafe ? 0xef4444 : 0xffffff }));
+      cone.position.copy(end); cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); liveGroup.add(cone);
+    }
+    const dot = label("", `person ${pp.status}`, at); dot.element.dataset.id = pp.id;
+    dot.element.addEventListener("mouseenter", () => showPerson(pp.id, dot.element)); dot.element.addEventListener("mouseleave", hideHover);
+    liveGroup.add(dot);
+  }
+  // pins (click for the CREAO report); only what needs attention, like the plan
+  const pinned = s.incidents.filter((i) => i.status === "active" && (i.priority !== "P4" || ["requested", "transferred", "joined"].includes(i.handoff?.status)));
+  for (const i of pinned) {
+    if (!onFloor(i.location.anchor)) continue;
+    const big = i.priority === "P1", c = PRI[i.priority] || PRI.P4, sc = big ? 1 : 0.8;
+    const o = label(`<svg width="${30 * sc}" height="${41 * sc}" viewBox="0 0 30 41"><path d="${PIN}" fill="${c}" stroke="${big ? "#fff" : "#000"}" stroke-width="2"/><text x="15" y="20" text-anchor="middle" fill="#000" font-family="Geist Mono" font-size="12" font-weight="800">${i.priority.slice(1)}</text></svg>`, "pin3", world(i.location.anchor, 3));
+    o.element.addEventListener("mouseenter", () => showPin(i.id, o.element)); o.element.addEventListener("mouseleave", hideHover);
+    o.element.addEventListener("click", () => openReport(i.id));
+    liveGroup.add(o);
+  }
+}
+window.Scene3D = {
+  ok: !!renderer, update,
+  setBuilding() { scanFor = null; fitted = false; },
+  floorChanged() { fitted = false; },
+  debug: () => ({ cam: camera.position.toArray().map((v) => +v.toFixed(1)), target: controls.target.toArray().map((v) => +v.toFixed(1)),
+    box: scanBox && [scanBox.min.toArray().map((v) => +v.toFixed(1)), scanBox.max.toArray().map((v) => +v.toFixed(1))] }),
+};
+if (S.s) drawPlace();
+</script>
+</body>
+</html>
