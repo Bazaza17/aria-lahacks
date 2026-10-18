@@ -142,7 +142,10 @@ def test_engine_fire_model(jw, collins):
     gal = [result["fire"]["spaces"][s]["smoke_enters_s"] for s in jw.zone("galleria").spaces]
     assert steps[("galleria", "smoke")] == round(min(t for t in gal if t is not None) / 60, 1)
     summary = model["summary"]
-    assert summary["exits_lost"][0]["exit_id"] == "collins_patio_doors"
+    # the first exit lost is whichever the engine loses first (with the atrium spill plume, the
+    # open stair into the Galleria goes before the Collins patio doors)
+    first = min((s for s in model["steps"] if s["kind"] == "exit lost"), key=lambda s: s["t_s"])
+    assert summary["exits_lost"][0]["exit_id"] == first["place"]
     assert [e["minute"] for e in summary["exits_lost"]] == sorted(
         e["minute"] for e in summary["exits_lost"]
     )
@@ -168,10 +171,15 @@ def test_engine_routes_map_to_profile_exits(jw, collins):
     for zone_id, exit_id in dep0["zones"].items():
         assert plan.exit_floor(jw, jw.exit(exit_id)) == jw.zone(zone_id).floor
     # room 219's engine route goes down a stair; the profile sends them to that stair, then out
+    # by the door it leads to (no "then" when the stair is itself the way out, e.g. ST-W)
     pred = result["routes"]["departures"][0]["spaces"]["219"]["predictive"]
     stair = next(jw.exit_for_opening(o) for o in pred["path"] if o.startswith("ST-"))
     assert dep0["zones"]["room_219"] == stair.id
-    assert dep0["then"]["room_219"] == jw.exit_for_opening(pred["exit"]).id
+    final = jw.exit_for_opening(pred["exit"]).id
+    if final != stair.id:
+        assert dep0["then"]["room_219"] == final
+    else:
+        assert "room_219" not in dep0["then"]
 
 
 def test_engine_route_uses_latest_departure(collins):
@@ -209,7 +217,9 @@ def test_instruction_for_2f_names_the_stair_then_the_door(jw, collins):
     msg = plan.instruction(jw, ev, found)["message"]
     assert msg.startswith("DRILL: ")
     assert jw.exit(dep0["zones"]["room_219"]).label in msg
-    assert "then out by" in msg and "elevator" in msg
+    assert "elevator" in msg
+    if "room_219" in dep0["then"]:
+        assert "then out by" in msg
     assert "lawn" not in msg.lower()
     # someone who only said "upstairs" gets the floor 2 routes, not the ground floor doors
     up = plan.instruction(jw, ev, loc.from_text(jw, "upstairs").as_dict())
