@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { BuildingCenterPane } from "@/components/building/BuildingCenterPane";
+import { BRAND } from "@/lib/brand";
 import { getServerSupabase, type Building } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -13,42 +14,43 @@ export default async function BuildingPage({ params }: { params: Promise<{ id: s
 
   if (error || !data) notFound();
   const building = data as Building;
+  // "James West Alumni Center, 325 Westwood Plaza, …" → "James West Alumni Center"
+  const name = building.address.split(",")[0].trim();
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-black text-white">
-      <header className="flex items-center justify-between border-b border-white/[0.08] px-8 py-5">
-        <div className="flex items-center gap-6">
-          <Link
-            href="/dashboard"
-            className="font-mono text-xs tracking-[0.3em] text-white/40 transition-colors hover:text-white"
-          >
-            ← DASHBOARD
+    <main className="flex h-screen flex-col overflow-hidden bg-page text-fg">
+      <header className="flex h-12 shrink-0 items-center gap-4 border-b border-rule bg-page pl-5 pr-3">
+        <Link href="/" className="text-[17px] font-medium text-fg">
+          {BRAND.name}
+        </Link>
+        <nav className="caps flex min-w-0 items-center gap-3 text-[11px]" aria-label="Breadcrumb">
+          <Link href="/dashboard" className="text-dim transition-colors hover:text-fg">
+            Dashboard
           </Link>
-          <span className="font-mono text-xs tracking-[0.3em] text-white/30">/</span>
-          <div className="flex items-center gap-3">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#ff6b00]" />
-            <h1 className="text-sm font-medium tracking-wide">{building.address}</h1>
-          </div>
-        </div>
-        <div className="flex items-center gap-4 font-mono text-[10px] tracking-[0.25em] text-white/40">
-          <span>
+          <span className="text-faint">/</span>
+          <span className="truncate text-soft">{name}</span>
+        </nav>
+        <div className="ml-auto flex items-center gap-4">
+          <span className="caps hidden text-[11px] tabular-nums text-faint md:inline">
             {building.lat.toFixed(4)}, {building.lng.toFixed(4)}
           </span>
-          <span className="hidden md:inline">·</span>
-          <span className="hidden md:inline">ID {building.id.slice(0, 8).toUpperCase()}</span>
           {/* The live dispatch console, served by the API through this app's /live proxy. */}
           <a
             href="/live/view"
-            className="rounded border border-[#ff6b00]/40 px-3 py-1.5 text-[#ff6b00] transition-colors hover:bg-[#ff6b00]/10"
+            className="flex h-[30px] items-center bg-white px-4 text-[13px] text-ink transition-colors hover:bg-rule-light"
           >
-            LIVE CONSOLE →
+            Live console ↗
           </a>
         </div>
       </header>
 
-      <section className="flex min-h-0 flex-1 bg-white/[0.06]">
+      <section className="flex min-h-0 flex-1 bg-page">
         <div className="min-h-0 flex-1">
-          <BuildingCenterPane buildingId={building.id} scanUrl={building.scan_url} />
+          <BuildingCenterPane
+            buildingId={building.id}
+            scanUrl={building.scan_url}
+            buildingName={name}
+          />
         </div>
       </section>
     </main>

@@ -1,72 +1,82 @@
 "use client";
 
-import { formatClock } from "@/lib/scan-fire";
+import { formatClock, type FireEvent } from "@/lib/scan-fire";
 
 import { FIRE_HORIZON_S, FIRE_STEP_S } from "./ScenarioProvider";
+
+// The range thumb is 10px wide, so its centre runs from 5px to (width - 5px).
+const THUMB_HALF_PX = 5;
+const LOUD_EVENTS = new Set(["ignition", "flashover"]);
+const TICK_LABELS = ["00:00", "05:00", "10:00", "15:00"];
+
+type Props = {
+  fireTime: number;
+  onFireTimeChange: (s: number) => void;
+  playing: boolean;
+  onPlayingChange: (p: boolean) => void;
+  /** The engine's fire events, drawn as ticks above the track. */
+  events?: FireEvent[];
+};
+
+function tickLeft(tS: number): string {
+  const frac = Math.min(1, Math.max(0, tS / FIRE_HORIZON_S));
+  return `calc(${THUMB_HALF_PX}px + (100% - ${THUMB_HALF_PX * 2}px) * ${frac})`;
+}
 
 export function ScenarioStrip({
   fireTime,
   onFireTimeChange,
   playing,
   onPlayingChange,
-}: {
-  fireTime: number;
-  onFireTimeChange: (s: number) => void;
-  playing: boolean;
-  onPlayingChange: (p: boolean) => void;
-}) {
+  events,
+}: Props) {
   const togglePlay = () => {
     if (!playing && fireTime >= FIRE_HORIZON_S) onFireTimeChange(0);
     onPlayingChange(!playing);
   };
 
   return (
-    <div className="border-t border-[#ff6b00]/30 bg-gradient-to-r from-[#0a0a0a] via-[#080808] to-[#060606]">
-      <div className="flex items-center justify-between border-b border-white/[0.04] px-4 py-1.5 font-mono text-[10px] tracking-[0.25em]">
-        <span className="text-[#ff6b00]/80">SCENARIO</span>
-        <span className="text-white/70">FIRE · T+{formatClock(fireTime)}</span>
-      </div>
+    <div className="flex h-14 shrink-0 items-center gap-4 border-t border-rule bg-page px-5">
+      <button
+        type="button"
+        onClick={togglePlay}
+        aria-label={playing ? "Pause fire timeline" : "Play fire timeline"}
+        className="flex h-[30px] w-[34px] shrink-0 items-center justify-center border border-control text-[11px] text-fg transition-colors hover:bg-white/[0.06]"
+      >
+        {playing ? "❚❚" : "▶"}
+      </button>
 
-      <div className="flex items-center gap-4 px-4 py-3">
-        <span className="w-28 shrink-0 font-mono text-[10px] tracking-[0.25em] text-[#ff6b00]/80">
-          FIRE TIMELINE
-        </span>
+      <span className="w-[84px] shrink-0 text-[16px] tabular-nums text-fg">
+        T+{formatClock(fireTime)}
+      </span>
 
-        <button
-          type="button"
-          onClick={togglePlay}
-          aria-label={playing ? "Pause fire timeline" : "Play fire timeline"}
-          className="shrink-0 rounded-sm border border-[#ff6b00]/40 px-2.5 py-1 font-mono text-[10px] tracking-[0.2em] text-[#ff6b00] hover:bg-[#ff6b00]/10"
-        >
-          {playing ? "PAUSE" : "PLAY"}
-        </button>
-
-        <div className="flex-1">
-          <div className="relative h-4">
-            <input
-              type="range"
-              min={0}
-              max={FIRE_HORIZON_S}
-              step={FIRE_STEP_S}
-              value={fireTime}
-              onChange={(e) => {
-                onPlayingChange(false);
-                onFireTimeChange(Number(e.target.value));
-              }}
-              className="aria-range absolute inset-0 w-full"
-              aria-label="Fire timeline"
+      <div className="relative min-w-0 flex-1 pt-2.5">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-2" aria-hidden>
+          {(events ?? []).map((e, i) => (
+            <span
+              key={`${i}-${e.type}-${e.id}`}
+              className={`absolute top-0 h-2 w-[1.5px] ${LOUD_EVENTS.has(e.type) ? "bg-fire" : "bg-control"}`}
+              style={{ left: tickLeft(e.t_s) }}
             />
-          </div>
-          <div className="mt-1 flex justify-between font-mono text-[9px] tracking-[0.15em] text-white/40">
-            <span>00:00</span>
-            <span>05:00</span>
-            <span>10:00</span>
-            <span>15:00</span>
-          </div>
+          ))}
         </div>
-
-        <div className="flex w-24 shrink-0 items-center justify-end font-mono text-[11px] text-white">
-          {formatClock(fireTime)}
+        <input
+          type="range"
+          min={0}
+          max={FIRE_HORIZON_S}
+          step={FIRE_STEP_S}
+          value={fireTime}
+          onChange={(e) => {
+            onPlayingChange(false);
+            onFireTimeChange(Number(e.target.value));
+          }}
+          className="aria-range block w-full"
+          aria-label="Fire timeline"
+        />
+        <div className="caps mt-0.5 flex justify-between text-[10px] text-faint">
+          {TICK_LABELS.map((label) => (
+            <span key={label}>{label}</span>
+          ))}
         </div>
       </div>
     </div>

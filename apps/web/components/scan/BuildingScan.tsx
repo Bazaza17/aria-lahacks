@@ -9,19 +9,9 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 
 import { useScenario } from "@/components/building/ScenarioProvider";
-import {
-  departureAt,
-  formatClock,
-  frameAt,
-  latestEvent,
-  loadFireStarts,
-  loadFireTimeline,
-  type FireStarts,
-  type FireTimeline,
-} from "@/lib/scan-fire";
+import { departureAt, frameAt, type FireStarts, type FireTimeline } from "@/lib/scan-fire";
 import { loadPlaceIndex, searchPlaces, type PlaceIndex } from "@/lib/scan-places";
 
-import { FireStartPicker } from "./FireStartPicker";
 import { PlaceSearch, type PlaceFound } from "./PlaceSearch";
 import {
   buildFireLayer,
@@ -62,12 +52,22 @@ type SceneBundle = {
   dispose: () => void;
 };
 
+/** The start space's plan name up to the first " (": "Collins Room, part 140". */
+function fireStartName(timeline: FireTimeline | null, starts: FireStarts | null): string | null {
+  if (!timeline) return null;
+  const id = timeline.start_room;
+  const name = starts?.starts.find((s) => s.id === id)?.label ?? timeline.rooms[id]?.name ?? id;
+  return name.split(" (")[0];
+}
+
 export function BuildingScan({
   buildingId,
   scanUrl: scanUrlProp,
+  buildingName,
 }: {
   buildingId: string;
   scanUrl?: string | null;
+  buildingName?: string;
 }) {
   const scanUrl = SCANS[buildingId] ?? scanUrlProp ?? null;
   const mountRef = useRef<HTMLDivElement>(null);
@@ -76,43 +76,13 @@ export function BuildingScan({
   const routeLayerRef = useRef<FireRouteLayerObjects | null>(null);
   const placeLayerRef = useRef<PlacePinLayerObjects | null>(null);
 
-  const { fireTime, fireStart, setFireStart } = useScenario();
-  const [fireTimeline, setFireTimeline] = useState<FireTimeline | null>(null);
-  const [fireStarts, setFireStarts] = useState<FireStarts | null>(null);
-  const [fireBusy, setFireBusy] = useState(false);
-  const [fireFailed, setFireFailed] = useState(false);
+  const { fireTime, fireTimeline, fireStarts } = useScenario();
   const [placeIndex, setPlaceIndex] = useState<PlaceIndex | null>(null);
   const [placeFound, setPlaceFound] = useState<PlaceFound | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [interacted, setInteracted] = useState(false);
   const [vertexCount, setVertexCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void loadFireStarts(buildingId).then((s) => {
-      if (!cancelled) setFireStarts(s);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [buildingId]);
-
-  // The engine's run for the chosen start (the API's default until one is picked). The last
-  // timeline stays on screen while a new start runs.
-  useEffect(() => {
-    let cancelled = false;
-    setFireBusy(true);
-    void loadFireTimeline(buildingId, fireStart ?? undefined).then((t) => {
-      if (cancelled) return;
-      if (t) setFireTimeline(t);
-      setFireFailed(!t);
-      setFireBusy(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [buildingId, fireStart]);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,10 +129,7 @@ export function BuildingScan({
     setPlaceFound(null);
   };
 
-  const fireEvent = fireTimeline ? latestEvent(fireTimeline, fireTime) : null;
-  const departure = fireTimeline ? departureAt(fireTimeline, fireTime) : null;
-  const frame = fireTimeline ? frameAt(fireTimeline, fireTime) : null;
-  const indicative = Boolean(frame?.beyond_screening);
+  const startName = fireStartName(fireTimeline, fireStarts);
 
   useEffect(() => {
     if (!scanUrl) return;
@@ -197,7 +164,7 @@ export function BuildingScan({
       mount.appendChild(labelRenderer.domElement);
 
       // Bright, even lighting so the scan reads well from every auto-rotate angle.
-      scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.6));
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x4a4f55, 1.6));
       scene.add(new THREE.AmbientLight(0xffffff, 0.7));
       const key = new THREE.DirectionalLight(0xffffff, 1.1);
       key.position.set(3, 4, 2);
@@ -254,8 +221,22 @@ export function BuildingScan({
         let verts = 0;
         group.traverse((obj) => {
           if ((obj as THREE.Mesh).isMesh) {
-            const attr = (obj as THREE.Mesh).geometry?.attributes?.position;
+            const mesh = obj as THREE.Mesh;
+            const attr = mesh.geometry?.attributes?.position;
             if (attr) verts += attr.count;
+            // Greyscale scan: only the routes and the fire carry colour.
+            for (const mat of [mesh.material].flat() as THREE.MeshStandardMaterial[]) {
+              if (!mat?.map) continue;
+              mat.onBeforeCompile = (shader) => {
+                shader.fragmentShader = shader.fragmentShader.replace(
+                  "#include <map_fragment>",
+                  `#include <map_fragment>
+                   float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+                   diffuseColor.rgb = vec3(lum) * 0.8;`,
+                );
+              };
+              mat.needsUpdate = true;
+            }
           }
         });
         setVertexCount(verts);
@@ -365,14 +346,22 @@ export function BuildingScan({
     routeLayerRef.current?.show(departureAt(fireTimeline, fireTime));
   }, [fireTimeline, fireTime, loaded]);
 
+  const headline = (
+    <h1 className="text-[44px] leading-[50px] tracking-[-0.03em]">
+      {buildingName && <span className="block text-fg">{buildingName}</span>}
+      {startName && <span className="block text-dim">Fire in {startName}.</span>}
+    </h1>
+  );
+
   if (!scanUrl) {
     return (
-      <section className="relative flex h-full flex-col gap-2 bg-[#0a0a0a] p-3">
-        <div className="flex flex-1 items-center justify-center rounded-sm border border-red-500/30 bg-black/60 p-6 text-center font-mono text-[10px] leading-relaxed tracking-[0.2em]">
+      <section className="relative h-full bg-scan">
+        <div className="pointer-events-none absolute left-8 top-9">{headline}</div>
+        <div className="caps absolute inset-0 flex items-center justify-center text-center text-[10px] leading-relaxed">
           <div>
-            <p className="text-red-300/90">NO LIDAR SCAN FOR THIS BUILDING</p>
-            <p className="mt-3 text-white/40">
-              upload the scan to the scans bucket
+            <p className="text-fire">No LiDAR scan for this building</p>
+            <p className="mt-3 text-dim">
+              Upload the scan to the scans bucket
               <br />
               set buildings.scan_url for this building
               <br />
@@ -385,88 +374,57 @@ export function BuildingScan({
   }
 
   return (
-    <section className="relative flex h-full flex-col gap-2 bg-[#0a0a0a] p-3">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 font-mono text-[10px] tracking-[0.3em]">
-        <div className="flex items-center gap-2 text-[#ff6b00]/80">
-          <span className="h-1 w-1 bg-[#ff6b00]" />
-          1F SCANNED (4 ROOMS) · UPPER FLOORS FROM FLOOR PLAN
+    <section className="relative h-full overflow-hidden bg-scan">
+      <div
+        ref={mountRef}
+        className="absolute inset-0"
+        style={{
+          transition: "opacity 400ms ease-out",
+          opacity: loaded ? 1 : 0,
+        }}
+      />
+
+      {!loaded && !failed && (
+        <div className="caps pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] text-faint">
+          Decoding scan…
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {fireTimeline && (
-            <span className="text-[#ffb27a]">
-              FIRE T+{formatClock(fireTime)}
-              {fireEvent ? ` · ${fireEvent.detail.toUpperCase()}` : ""}
-            </span>
-          )}
-          {indicative && (
-            <span className="rounded-sm border border-amber-300/40 px-1.5 text-amber-200">
-              INDICATIVE AFTER FLASHOVER
-            </span>
-          )}
-          {departure && (
-            <span className="text-sky-300/90">
-              LEAVE AT T+{formatClock(departure.t0_s)} · AT RISK {departure.at_risk.plan} ARIA /{" "}
-              {departure.at_risk.reactive} SELF-CHOSEN
-            </span>
-          )}
-          <span className="text-white/30">
-            {failed ? "SCAN UNAVAILABLE" : loaded ? "READY" : "LOADING"}
-          </span>
+      )}
+      {failed && (
+        <div className="caps pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] text-dim">
+          Scan could not load
         </div>
+      )}
+
+      <div className="pointer-events-none absolute left-8 top-9 z-20 flex flex-col gap-7 [text-shadow:0_0_16px_var(--color-scan),0_0_6px_var(--color-scan),0_0_2px_var(--color-scan)]">
+        {headline}
+        {loaded && !failed && placeIndex && (
+          <PlaceSearch found={placeFound} onSearch={findPlace} onClear={handlePlaceClear} />
+        )}
       </div>
 
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-sm border border-[#ff6b00]/20 bg-black/60">
-        <div
-          ref={mountRef}
-          className="absolute inset-0"
-          style={{
-            transition: "opacity 400ms ease-out",
-            opacity: loaded ? 1 : 0,
-          }}
+      {loaded && !failed && (
+        <ScanMetadata
+          vertexCount={vertexCount}
+          hasFire={Boolean(fireTimeline)}
+          verified={fireTimeline?.verified ?? false}
         />
+      )}
 
-        {!loaded && !failed && (
-          <div className="absolute inset-0 flex items-center justify-center font-mono text-[10px] tracking-[0.3em] text-white/30">
-            DECODING SCAN…
+      {loaded && !failed && (
+        <div className="caps pointer-events-none absolute bottom-5 right-5 flex flex-col items-end gap-2 text-[10px] text-dim [text-shadow:0_0_16px_var(--color-scan),0_0_6px_var(--color-scan),0_0_2px_var(--color-scan)]">
+          {!interacted && <span className="text-faint">Drag to rotate · scroll to zoom</span>}
+          <div className="flex items-center gap-5">
+            <span className="flex items-center gap-2">
+              <span className="h-0.5 w-3.5 bg-fg" aria-hidden />
+              Aria plan
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="h-0.5 w-3.5 bg-fire" aria-hidden />
+              At risk
+            </span>
           </div>
-        )}
-        {failed && (
-          <div className="absolute inset-0 flex items-center justify-center font-mono text-[10px] tracking-[0.3em] text-white/40">
-            SCAN COULD NOT LOAD
-          </div>
-        )}
-
-        {loaded && !failed && (
-          <div className="pointer-events-auto absolute left-3 top-3 z-20 flex flex-col gap-2">
-            {fireStarts && (
-              <FireStartPicker
-                starts={fireStarts.starts}
-                value={fireStart ?? fireTimeline?.start_room ?? fireStarts.default}
-                busy={fireBusy}
-                failed={fireFailed}
-                onChange={setFireStart}
-              />
-            )}
-            {placeIndex && (
-              <PlaceSearch found={placeFound} onSearch={findPlace} onClear={handlePlaceClear} />
-            )}
-          </div>
-        )}
-
-        {loaded && !failed && (
-          <ScanMetadata
-            vertexCount={vertexCount}
-            hasFire={Boolean(fireTimeline)}
-            verified={fireTimeline?.verified ?? false}
-          />
-        )}
-
-        {loaded && !interacted && !failed && (
-          <div className="pointer-events-none absolute bottom-3 right-4 font-mono text-[9px] tracking-[0.3em] text-white/40">
-            DRAG TO ROTATE · SCROLL TO ZOOM
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -487,8 +445,8 @@ function focusCamera({ camera, controls }: SceneBundle, points: THREE.Vector3[])
 
 function formatVertices(count: number | null): string {
   if (!count) return "—";
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M VERTICES`;
-  return `${Math.round(count / 1000)}K VERTICES`;
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M vertices`;
+  return `${Math.round(count / 1000)}K vertices`;
 }
 
 /** What the model on screen is made of: true values only. */
@@ -502,23 +460,23 @@ function ScanMetadata({
   verified: boolean;
 }) {
   return (
-    <div className="pointer-events-none absolute bottom-3 left-3 max-w-[320px] rounded-md border border-white/[0.08] bg-black/70 px-3 py-2 font-mono text-[10px] leading-relaxed backdrop-blur">
-      <Row label="SCAN" value="PHONE LIDAR · 4 ROOMS OF THE 1F" />
-      <Row label="STITCH" value="ABOUT ±0.3 M AT THE JOINS" />
-      <Row label="MESH" value={formatVertices(vertexCount)} />
-      <Row label="REST" value="FLOOR PLAN · DASHED OUTLINES" />
+    <div className="pointer-events-none absolute bottom-4 left-8 flex gap-8 [text-shadow:0_0_16px_var(--color-scan),0_0_6px_var(--color-scan),0_0_2px_var(--color-scan)]">
+      <Caption label="Scan" value="Phone LiDAR · 4 rooms of 1F" />
+      <Caption label="Stitch" value="±0.3 m at the joins" />
+      <Caption label="Mesh" value={formatVertices(vertexCount)} />
+      <Caption label="Rest" value="Floor plan · dashed" />
       {hasFire && (
-        <Row label="FIRE" value={verified ? "ENGINE · VERIFIED" : "ENGINE · SCREENING MODEL"} />
+        <Caption label="Fire" value={verified ? "Engine · verified" : "Engine · screening"} />
       )}
     </div>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Caption({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex gap-3 whitespace-nowrap">
-      <span className="w-16 shrink-0 tracking-[0.2em] text-[#ff6b00]/70">{label}</span>
-      <span className="text-white/85">{value}</span>
+    <div className="caps flex flex-col gap-1 whitespace-nowrap text-[10px]">
+      <span className="text-faint">{label}</span>
+      <span className="text-dim">{value}</span>
     </div>
   );
 }

@@ -4,12 +4,12 @@ import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import type { FireFrame, FireRoom, FireRouteDeparture, FireTimeline } from "@/lib/scan-fire";
 import { placeTag, placeToWorld, SPACE_TYPES, type PlaceMatch } from "@/lib/scan-places";
 
-const SMOKE_GREY = 0x6b7280;
-const FLOOR_BURNING = 0xff6b00;
-const FLOOR_FLASHOVER = 0xef4444;
+const SMOKE_GREY = 0x8e9196;
+const FLOOR_BURNING = 0xff5a48;
+const FLOOR_FLASHOVER = 0xff5a48;
 const FLOOR_BURNT = 0x1c1917;
-const DOOR_OPEN = 0x22c55e;
-const DOOR_BLOCKED = 0xef4444;
+const DOOR_OPEN = 0xc8cbcf;
+const DOOR_BLOCKED = 0xff5a48;
 const DEFAULT_CEILING_M = 3;
 // Scanned rooms get a solid outline. Rooms from the floor plan (the rest of the 1F and every upper
 // floor) get a fainter dashed one, so nothing plan-derived passes for scanned.
@@ -211,9 +211,9 @@ export function buildFireLayer(
   };
 }
 
-const ROUTE_PLAN = 0x38bdf8;
-const ROUTE_PLAN_AT_RISK = 0xf59e0b;
-const ROUTE_REACTIVE = 0xef4444;
+const ROUTE_PLAN = 0xeceef1;
+const ROUTE_PLAN_AT_RISK = 0xff5a48;
+const ROUTE_REACTIVE = 0xff5a48;
 const ROUTE_LIFT_M = 0.25;
 
 export type FireRouteLayerObjects = {
@@ -223,7 +223,7 @@ export type FireRouteLayerObjects = {
 };
 
 /**
- * Evacuation routes from the engine, one group per departure time. Aria's plan is blue (amber
+ * Evacuation routes from the engine, one group per departure time. Aria's plan is white (red
  * where people are still at risk); a self-chosen route that fails is red.
  */
 export function buildFireRouteLayer(
@@ -277,8 +277,8 @@ export function buildFireRouteLayer(
   };
 }
 
-// Fuchsia, so a found place stands apart from fire orange, smoke grey and the route colors.
-const PLACE_PIN = 0xe879f9;
+// White, so a found place stands apart from the red fire, grey smoke and the route colours.
+const PLACE_PIN = 0xffffff;
 const PIN_BEAM_M = 6;
 // Snap to the scan: cast down from this far above the plan floor, and take the hit closest to
 // the plan floor within the tolerance (the first hit can be a table or a stair rail).

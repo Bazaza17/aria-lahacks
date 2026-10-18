@@ -10,24 +10,26 @@ test.describe("Venue pre-plan", () => {
 
     await page.goto(`/building/${VENUE}`);
 
-    await expect(page.getByText("FIRE PRE-PLAN", { exact: true })).toBeVisible();
-    await expect(page.getByText(/1F SCANNED .* UPPER FLOORS FROM FLOOR PLAN/)).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: /James West Alumni Center/ }),
+    ).toBeVisible();
     await expect(page.locator("canvas").first()).toBeVisible({ timeout: 90_000 });
 
-    // The size-up follows the engine's default start, then a new one.
-    await expect(page.getByText(/EXITS · \d+ OF \d+ LOST/)).toBeVisible({ timeout: 30_000 });
+    // The panel follows the engine's default start, then a new one.
+    await expect(page.getByText("People in the building")).toBeVisible({ timeout: 30_000 });
     const picker = page.getByLabel("Space the fire starts in");
     await picker.selectOption("120");
-    await expect(page.getByText(/Founders' Room · 120/)).toBeVisible({ timeout: 30_000 });
+    await expect(picker).toHaveValue("120");
+    await expect(page.getByText(/Fire in Founders' Room/)).toBeVisible({ timeout: 30_000 });
 
-    // Move the fire clock past the first flashover.
-    const clock = page.getByLabel("Fire timeline");
+    // Move the fire clock to the end.
+    const clock = page.getByRole("slider", { name: "Fire timeline" });
     await clock.evaluate((el: HTMLInputElement) => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
       setter.call(el, "900");
       el.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    await expect(page.getByText(/IF EVERYONE LEAVES AT T\+07:00/)).toBeVisible();
+    await expect(page.getByText(/leave at T\+07:00/i)).toBeVisible();
 
     expect(errors).toEqual([]);
   });

@@ -5,39 +5,50 @@ import type { FireStart } from "@/lib/scan-fire";
 type Props = {
   starts: FireStart[];
   value: string;
-  busy: boolean;
-  failed: boolean;
+  disabled: boolean;
   onChange: (id: string) => void;
 };
 
 /** "Fire starts in": picks the start space; the API reruns the engine for it. */
-export function FireStartPicker({ starts, value, busy, failed, onChange }: Props) {
+export function FireStartPicker({ starts, value, disabled, onChange }: Props) {
   const storeys = [...new Set(starts.map((s) => s.storey ?? "?"))];
+  // "Founders' Room (120)" reads "Founders' Room"; the note stays only where two names collide.
+  const short = (s: FireStart) => (s.label ?? s.name).split(" (")[0];
+  const shortCounts = new Map<string, number>();
+  for (const s of starts) shortCounts.set(short(s), (shortCounts.get(short(s)) ?? 0) + 1);
+  const optionLabel = (s: FireStart) =>
+    (shortCounts.get(short(s)) ?? 0) > 1 ? (s.label ?? s.name) : short(s);
 
   return (
-    <label className="flex w-[260px] items-center gap-2 rounded-md border border-[#ff6b00]/30 bg-black/80 px-2 py-1 font-mono text-[9px] tracking-[0.12em] backdrop-blur">
-      <span className="shrink-0 text-[#ff6b00]">FIRE STARTS IN</span>
+    <div className="relative">
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        disabled={busy}
+        disabled={disabled}
         aria-label="Space the fire starts in"
-        className="min-w-0 flex-1 rounded-sm bg-white/[0.04] px-1 py-0.5 text-white/85 outline-none focus:bg-white/[0.08] disabled:opacity-50"
+        className="h-[34px] w-full cursor-pointer appearance-none truncate border border-rule bg-transparent pl-3 pr-20 text-[14px] text-fg outline-none transition-colors hover:border-control focus-visible:border-control disabled:cursor-wait disabled:opacity-60"
       >
         {storeys.map((storey) => (
-          <optgroup key={storey} label={storey} className="bg-black">
+          <optgroup key={storey} label={storey} className="bg-page">
             {starts
               .filter((s) => (s.storey ?? "?") === storey)
               .map((s) => (
-                <option key={s.id} value={s.id} title={s.id} className="bg-black">
-                  {s.label ?? s.name}
+                <option key={s.id} value={s.id} title={s.id} className="bg-page">
+                  {optionLabel(s)}
                 </option>
               ))}
           </optgroup>
         ))}
       </select>
-      {busy && <span className="shrink-0 animate-pulse text-white/40">RUNNING</span>}
-      {failed && !busy && <span className="shrink-0 text-red-300/80">OFFLINE</span>}
-    </label>
+      <span
+        className="caps pointer-events-none absolute inset-y-0 right-3 flex items-center gap-2.5 text-[10px] text-dim"
+        aria-hidden
+      >
+        {value}
+        <svg width="8" height="5" viewBox="0 0 8 5" className="text-quiet">
+          <path d="M0.5 0.5 4 4 7.5 0.5" fill="none" stroke="currentColor" />
+        </svg>
+      </span>
+    </div>
   );
 }
