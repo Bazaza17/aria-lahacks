@@ -5,7 +5,7 @@ import type { MeshSize } from "@/lib/scan-coords";
 import type { ResolvedExit, ResolvedRoute } from "@/lib/scan-evac-paths";
 import { exitWorldPosition } from "@/lib/scan-evac-paths";
 import { waterWorldY } from "@/lib/scan-flood";
-import type { FireFrame, FireTimeline } from "@/lib/scan-fire";
+import type { FireFrame, FireRoom, FireRouteDeparture, FireTimeline } from "@/lib/scan-fire";
 
 const ROUTE_GREEN = 0x22c55e;
 const ROUTE_RED = 0xef4444;
@@ -184,6 +184,9 @@ const FLOOR_BURNT = 0x1c1917;
 const DOOR_OPEN = 0x22c55e;
 const DOOR_BLOCKED = 0xef4444;
 const DEFAULT_CEILING_M = 3;
+// Upper storeys have no scan under them, so they are drawn as faint outlines that fill with smoke.
+const OUTLINE_OPACITY = 0.35;
+const UPPER_OUTLINE_OPACITY = 0.18;
 
 export type FireLayerObjects = {
   group: THREE.Group;
@@ -195,50 +198,77 @@ type FireRoomMeshes = {
   ceilingM: number;
   smoke: THREE.Mesh;
   smokeMat: THREE.MeshBasicMaterial;
-  floor: THREE.Mesh;
   floorMat: THREE.MeshBasicMaterial;
 };
 
+type ScanCenter = { x: number; y: number; z: number };
+
+function roomOutline(room: FireRoom): [number, number][] | null {
+  if (room.polygon && room.polygon.length >= 3) return room.polygon;
+  if (!room.footprint) return null;
+  const [x0, x1] = room.footprint.x;
+  const [z0, z1] = room.footprint.z;
+  return [
+    [x0, z0],
+    [x1, z0],
+    [x1, z1],
+    [x0, z1],
+  ];
+}
+
 /**
- * Engine fire timeline drawn over the scan. Room footprints are in GLB mesh
- * coordinates; the viewer shifts the mesh by -center, so we do the same.
+ * Room outline as a THREE.Shape for a group rotated -90° about X: local (x, y, z) lands at
+ * world (x, z, -y), so plan z goes in as -y and extrusion depth becomes height.
+ */
+function roomShape(outline: [number, number][], center: ScanCenter): THREE.Shape {
+  return new THREE.Shape(outline.map(([x, z]) => new THREE.Vector2(x - center.x, -(z - center.z))));
+}
+
+/**
+ * Engine fire timeline drawn over the scan. Room outlines are in the scan's frame; the viewer
+ * shifts the mesh by -center, so we do the same. Rooms on upper floors sit at their
+ * floor_elevation_m above the scan floor.
  */
 export function buildFireLayer(
   timeline: FireTimeline,
-  center: { x: number; y: number; z: number },
+  center: ScanCenter,
   floorY: number,
 ): FireLayerObjects {
   const group = new THREE.Group();
   const disposables: Array<THREE.BufferGeometry | THREE.Material> = [];
   const rooms = new Map<string, FireRoomMeshes>();
+  const roomElevation = new Map<string, number>();
   const doors = new Map<string, THREE.MeshBasicMaterial>();
   const y0 = floorY - center.y;
   const firstFrame = timeline.frames[0];
 
   for (const [id, room] of Object.entries(timeline.rooms)) {
-    if (room.floor !== 1 || !room.footprint) continue;
-    const [x0, x1] = room.footprint.x;
-    const [z0, z1] = room.footprint.z;
-    const w = x1 - x0;
-    const d = z1 - z0;
-    const cx = (x0 + x1) / 2 - center.x;
-    const cz = (z0 + z1) / 2 - center.z;
+    const outline = roomOutline(room);
+    if (!outline) continue;
+    const upper = room.floor !== 1;
+    const elevation = room.floor_elevation_m ?? 0;
     const ceilingM =
       room.ceiling_height_m ?? firstFrame?.rooms[id]?.layer_height_m ?? DEFAULT_CEILING_M;
+    const shape = roomShape(outline, center);
 
-    const smokeGeo = new THREE.BoxGeometry(w, 1, d);
+    const roomGroup = new THREE.Group();
+    roomGroup.rotation.x = -Math.PI / 2;
+    roomGroup.position.y = y0 + elevation;
+
+    // Smoke volume: a unit-depth extrusion scaled to the layer depth each frame.
+    const smokeGeo = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false });
     const smokeMat = new THREE.MeshBasicMaterial({
       color: SMOKE_GREY,
       transparent: true,
       opacity: 0,
       depthWrite: false,
+      side: THREE.DoubleSide,
     });
     const smoke = new THREE.Mesh(smokeGeo, smokeMat);
-    smoke.position.set(cx, y0 + ceilingM / 2, cz);
     smoke.visible = false;
     smoke.renderOrder = 2;
 
-    const floorGeo = new THREE.PlaneGeometry(w, d);
+    const floorGeo = new THREE.ShapeGeometry(shape);
     const floorMat = new THREE.MeshBasicMaterial({
       color: FLOOR_BURNING,
       transparent: true,
@@ -247,40 +277,37 @@ export function buildFireLayer(
       depthWrite: false,
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(cx, y0 + 0.02, cz);
+    floor.position.z = 0.02;
     floor.renderOrder = 1;
 
-    const outlinePts = [
-      [x0, z0],
-      [x1, z0],
-      [x1, z1],
-      [x0, z1],
-      [x0, z0],
-    ].map(([x, z]) => new THREE.Vector3(x - center.x, y0 + 0.03, z - center.z));
-    const outlineGeo = new THREE.BufferGeometry().setFromPoints(outlinePts);
+    const outlineGeo = new THREE.BufferGeometry().setFromPoints(
+      shape.getPoints().map((pt) => new THREE.Vector3(pt.x, pt.y, 0.03)),
+    );
     const outlineMat = new THREE.LineBasicMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: 0.35,
+      opacity: upper ? UPPER_OUTLINE_OPACITY : OUTLINE_OPACITY,
     });
-    const outline = new THREE.Line(outlineGeo, outlineMat);
+    const outlineLine = new THREE.LineLoop(outlineGeo, outlineMat);
 
-    group.add(smoke, floor, outline);
+    roomGroup.add(smoke, floor, outlineLine);
+    group.add(roomGroup);
     disposables.push(smokeGeo, smokeMat, floorGeo, floorMat, outlineGeo, outlineMat);
-    rooms.set(id, { ceilingM, smoke, smokeMat, floor, floorMat });
+    rooms.set(id, { ceilingM, smoke, smokeMat, floorMat });
+    roomElevation.set(id, elevation);
   }
 
   const exitDoors = new Set(timeline.exits.map((e) => e.door));
   for (const [id, door] of Object.entries(timeline.doors)) {
     if (!door.position) continue;
-    const onFloor1 = door.connects.some((r) => rooms.has(r));
-    if (!onFloor1) continue;
+    const drawnSide = door.connects.find((r) => rooms.has(r));
+    if (!drawnSide) continue;
     const r = exitDoors.has(id) ? 0.45 : 0.25;
     const geo = new THREE.SphereGeometry(r, 16, 16);
     const mat = new THREE.MeshBasicMaterial({ color: DOOR_OPEN });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(door.position.x - center.x, y0 + 1, door.position.z - center.z);
+    const elevation = roomElevation.get(drawnSide) ?? 0;
+    mesh.position.set(door.position.x - center.x, y0 + elevation + 1, door.position.z - center.z);
     group.add(mesh);
     disposables.push(geo, mat);
     doors.set(id, mat);
@@ -296,8 +323,8 @@ export function buildFireLayer(
         meshes.smoke.visible = false;
       } else {
         meshes.smoke.visible = true;
-        meshes.smoke.scale.y = depth;
-        meshes.smoke.position.y = y0 + bottom + depth / 2;
+        meshes.smoke.scale.z = depth;
+        meshes.smoke.position.z = bottom;
         const depthFrac = depth / meshes.ceilingM;
         const heat = Math.min(1, Math.max(0, (state.layer_temp_c - 20) / 600));
         meshes.smokeMat.opacity = Math.min(0.85, 0.15 + 0.45 * depthFrac + 0.25 * heat);
@@ -328,6 +355,72 @@ export function buildFireLayer(
   return {
     group,
     update,
+    dispose: () => {
+      for (const d of disposables) d.dispose();
+      group.clear();
+    },
+  };
+}
+
+const ROUTE_PLAN = 0x38bdf8;
+const ROUTE_PLAN_AT_RISK = 0xf59e0b;
+const ROUTE_REACTIVE = 0xef4444;
+const ROUTE_LIFT_M = 0.25;
+
+export type FireRouteLayerObjects = {
+  group: THREE.Group;
+  show: (departure: FireRouteDeparture | null) => void;
+  dispose: () => void;
+};
+
+/**
+ * Evacuation routes from the engine, one group per departure time. Aria's plan is blue (amber
+ * where people are still at risk); a self-chosen route that fails is red.
+ */
+export function buildFireRouteLayer(
+  timeline: FireTimeline,
+  center: ScanCenter,
+  floorY: number,
+): FireRouteLayerObjects {
+  const group = new THREE.Group();
+  const disposables: Array<THREE.BufferGeometry | THREE.Material> = [];
+  const byDeparture = new Map<number, THREE.Group>();
+  const y0 = floorY - center.y;
+
+  for (const departure of timeline.routes?.departures ?? []) {
+    const departureGroup = new THREE.Group();
+    departureGroup.visible = false;
+    for (const route of departure.routes) {
+      if (route.points.length < 2) continue;
+      const pts = route.points.map(
+        ([x, z, elevation]) =>
+          new THREE.Vector3(x - center.x, y0 + elevation + ROUTE_LIFT_M, z - center.z),
+      );
+      const path = new THREE.CurvePath<THREE.Vector3>();
+      for (let i = 1; i < pts.length; i++) path.add(new THREE.LineCurve3(pts[i - 1], pts[i]));
+      const plan = route.kind === "plan";
+      const geo = new THREE.TubeGeometry(path, Math.max(8, pts.length * 6), plan ? 0.12 : 0.09, 6);
+      const color = !plan ? ROUTE_REACTIVE : route.at_risk > 0 ? ROUTE_PLAN_AT_RISK : ROUTE_PLAN;
+      const mat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: plan ? 0.9 : 0.75,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 3;
+      departureGroup.add(mesh);
+      disposables.push(geo, mat);
+    }
+    group.add(departureGroup);
+    byDeparture.set(departure.t0_s, departureGroup);
+  }
+
+  return {
+    group,
+    show: (departure) => {
+      for (const [t0, g] of byDeparture) g.visible = departure !== null && t0 === departure.t0_s;
+    },
     dispose: () => {
       for (const d of disposables) d.dispose();
       group.clear();

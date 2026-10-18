@@ -182,7 +182,10 @@ def run_demo(
             "fire_rooms": tl.rooms,
             "fire_doors": tl.doors,
         },
-        "viewer": outputs.viewer(av, tl, start, growth, frames, events, lost),
+        "viewer": {
+            **outputs.viewer(av, tl, start, growth, frames, events, lost),
+            "routes": outputs.viewer_routes(deps),
+        },
         "routes": {"departures": deps, "scan": scan},
     }
     result["summary"] = summary.build(av, tl, vt, start, deps, scan, lost)
@@ -336,6 +339,11 @@ def _parser() -> argparse.ArgumentParser:
         "--scan-step", type=float, default=DEFAULT_SCAN_STEP_S, help="s between scanned departures"
     )
     p.add_argument("--out", help="write the JSON to this file")
+    p.add_argument(
+        "--viewer-out",
+        help="also write just the viewer block (FireTimeline + routes) here, e.g. "
+        "../../apps/web/public/fire/venue.json",
+    )
     p.add_argument("--summary", action="store_true", help="print a readable summary")
     p.add_argument(
         "--door",
@@ -402,6 +410,10 @@ def main(argv: list[str] | None = None) -> int:
         p.error(str(err))
     if args.out:
         Path(args.out).write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    if args.viewer_out:
+        Path(args.viewer_out).write_text(
+            json.dumps(result["viewer"], ensure_ascii=False), encoding="utf-8"
+        )
     if args.summary:
         print(summary_text(result))
         if args.out:

@@ -192,6 +192,7 @@ def viewer(
             "name": av.label(sid),
             "floor": av.floor(sid),
             "footprint": {"x": [box[0], box[1]], "z": [box[2], box[3]]} if box else None,
+            "polygon": [[round(x, 2), round(z, 2)] for x, z in poly] or None,
             "ceiling_height_m": av.height(sid),
             "floor_elevation_m": av.spaces[sid].get("floor_elevation"),
         }
@@ -224,3 +225,44 @@ def viewer(
             "floor_y": scan_floor_y(av),
         },
     }
+
+
+def _route_line(sid: str, occupants: int, kind: str, r: dict) -> dict:
+    return {
+        "space": sid,
+        "occupants": occupants,
+        "kind": kind,
+        "status": r.get("status"),
+        "at_risk": r.get("at_risk", 0),
+        "exit": r.get("exit"),
+        "points": [[round(p[0], 2), round(p[1], 2), round(p[2], 2)] for p in r.get("points") or []],
+    }
+
+
+def viewer_routes(deps: list[dict]) -> dict:
+    """Per departure time: Aria's plan for every occupied space, plus the self-chosen
+    (reactive) route wherever it puts people at risk. Points are [x, z, elevation]."""
+    out = []
+    for dep in deps:
+        lines = []
+        for sid, sp in dep["spaces"].items():
+            occupants = sp.get("occupants", 0)
+            if not occupants:
+                continue
+            plan, reactive = sp.get("predictive") or {}, sp.get("reactive") or {}
+            if plan.get("points"):
+                lines.append(_route_line(sid, occupants, "plan", plan))
+            fails = reactive.get("at_risk") or reactive.get("status") != "ok"
+            if reactive.get("points") and fails:
+                lines.append(_route_line(sid, occupants, "reactive", reactive))
+        out.append(
+            {
+                "t0_s": dep["t0_s"],
+                "at_risk": {
+                    "plan": dep["occupants_at_risk"].get("predictive", 0),
+                    "reactive": dep["occupants_at_risk"].get("reactive", 0),
+                },
+                "routes": lines,
+            }
+        )
+    return {"departures": out}

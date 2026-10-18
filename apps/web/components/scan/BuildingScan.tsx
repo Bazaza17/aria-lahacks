@@ -21,6 +21,7 @@ import {
 } from "@/lib/scan-hazard-pins";
 import { hasEvacPlan, openExitCount, resolveEvacPlan } from "@/lib/scan-evac-paths";
 import {
+  departureAt,
   formatClock,
   frameAt,
   latestEvent,
@@ -33,8 +34,10 @@ import { ScanViewToolbar } from "./ScanViewToolbar";
 import {
   buildEvacLayer,
   buildFireLayer,
+  buildFireRouteLayer,
   type EvacLayerObjects,
   type FireLayerObjects,
+  type FireRouteLayerObjects,
 } from "./scanSceneLayers";
 
 export type ScanViewMode = "default" | "evac" | "hazards";
@@ -53,8 +56,9 @@ const SCANS: Record<string, string | undefined> = {
   "014b39a9-09b8-432b-9b62-363e06383d1f": "/scans/building_a/scan.usdz",
   "870d979d-6eaf-4d7f-894a-8ca34e527237": "/scans/building_b/scan.usdz",
   "e5a3fddc-e22c-431c-a5d3-ee29ef8604d1": storageUrl("scans/the_dock/scan.usdz"),
-  // Local preview (/fire-preview); the GLB is gitignored under public/scans.
-  venue: "/scans/venue/scan.glb",
+  // Local preview (/fire-preview): the four venue scans stitched in the venue frame, the same
+  // frame as public/fire/venue.json. The GLB is gitignored under public/scans.
+  venue: "/scans/venue_4rooms_web.glb",
 };
 
 // Scan floor height in GLB coordinates, if the timeline doesn't give one.
@@ -97,6 +101,7 @@ export function BuildingScan({
   const pinObjectsRef = useRef<THREE.Object3D[]>([]);
   const evacLayerRef = useRef<EvacLayerObjects | null>(null);
   const fireLayerRef = useRef<FireLayerObjects | null>(null);
+  const routeLayerRef = useRef<FireRouteLayerObjects | null>(null);
   const animatedPinIdsRef = useRef(new Set<string>());
   const viewModeRef = useRef<ScanViewMode>("default");
 
@@ -145,6 +150,7 @@ export function BuildingScan({
   }, [buildingId]);
 
   const fireEvent = fireTimeline ? latestEvent(fireTimeline, fireTime) : null;
+  const departure = fireTimeline ? departureAt(fireTimeline, fireTime) : null;
 
   useEffect(() => {
     if (!report || allPins.length === 0) {
@@ -387,23 +393,25 @@ export function BuildingScan({
   useEffect(() => {
     const bundle = sceneRef.current;
     if (!bundle || !loaded || !fireTimeline) return;
-    const layer = buildFireLayer(
-      fireTimeline,
-      bundle.meshCenter,
-      fireTimeline.scan.floor_y ?? DEFAULT_FLOOR_Y,
-    );
-    bundle.fireRoot.add(layer.group);
+    const floorY = fireTimeline.scan.floor_y ?? DEFAULT_FLOOR_Y;
+    const layer = buildFireLayer(fireTimeline, bundle.meshCenter, floorY);
+    const routes = buildFireRouteLayer(fireTimeline, bundle.meshCenter, floorY);
+    bundle.fireRoot.add(layer.group, routes.group);
     fireLayerRef.current = layer;
+    routeLayerRef.current = routes;
     return () => {
-      bundle.fireRoot.remove(layer.group);
+      bundle.fireRoot.remove(layer.group, routes.group);
       layer.dispose();
+      routes.dispose();
       if (fireLayerRef.current === layer) fireLayerRef.current = null;
+      if (routeLayerRef.current === routes) routeLayerRef.current = null;
     };
   }, [loaded, fireTimeline]);
 
   useEffect(() => {
     if (!fireTimeline) return;
     fireLayerRef.current?.update(frameAt(fireTimeline, fireTime));
+    routeLayerRef.current?.show(departureAt(fireTimeline, fireTime));
   }, [fireTimeline, fireTime, loaded]);
 
   // Hazard pins (hazards mode only)
@@ -484,6 +492,12 @@ export function BuildingScan({
             <span className="text-[#ffb27a]">
               FIRE T+{formatClock(fireTime)}
               {fireEvent ? ` · ${fireEvent.detail.toUpperCase()}` : ""}
+            </span>
+          )}
+          {departure && (
+            <span className="text-sky-300/90">
+              LEAVE AT T+{formatClock(departure.t0_s)} · AT RISK {departure.at_risk.plan} ARIA /{" "}
+              {departure.at_risk.reactive} SELF-CHOSEN
             </span>
           )}
           {viewMode === "evac" && evacPlan && (
