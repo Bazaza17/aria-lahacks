@@ -5,14 +5,14 @@
 ## The Project
 
 - **Name:** Aria
-- **One-liner:** [what it does, in one sentence]
+- **One-liner:** Aria turns a phone scan of a building into a fire pre-plan: how fire spreads, which exits stay open, how long everyone takes to get out, and a size-up for responders.
 - **Demo flow:** [the 3–5 steps judges will see]
 - **Deadline:** Sun Oct 18, 12:00 PM PDT. Judging at 12:30 PM, in person.
 - **Goal:** win. Main track: Applied Intelligence. Other company challenges are open, favoring recruiting benefits and good cash prizes (`docs/lahacks/03-tracks.md`).
 - **Sentry:** entered. Set it up at the start and collect the "moments" all weekend (plan in `docs/lahacks/05-plan.md`).
-- **Team:** Lincoln plus two teammates. [who owns what; see Parallel sessions]
+- **Team:** Lincoln plus two teammates. Lincoln leans toward the engine (he's also doing the scan and floor plan). [the rest of the split; see Parallel sessions]
 - **Build order:** engine first (world model → routes → fire timeline → crowd sim), then wrap it in agents: an orchestrator plus world model, hazard, evac sim and report specialists.
-- **Stack:** Next.js 16 + React 19 + Tailwind 4 + Three.js + Mapbox (`apps/web`), FastAPI + Claude tool loop over SSE (`apps/api`), Supabase (`infra/supabase`), the engine in `packages/engine` (empty), agents in `apps/agents` [agent framework: Fetch.ai uAgents + ASI:One is set up there and is the lean]. Agents run on the laptop first and on a cloud host by Sunday.
+- **Stack:** Next.js 16 + React 19 + Tailwind 4 + Three.js + Mapbox (`apps/web`), FastAPI + Claude tool loop over SSE (`apps/api`), Supabase (`infra/supabase`), the engine in `packages/engine` (empty), agents in `apps/agents` [agent framework: Fetch.ai uAgents + ASI:One is set up there, but Fetch.ai is fading, so this is open]. Agents run on the laptop first and on a cloud host by Sunday.
 - **Context:** `docs/lahacks/`. Start with `00-start-here.md`; what's decided and what's open is in `01-decisions.md`.
 
 ## What changes from the Miami version
@@ -96,7 +96,7 @@ My global ECC setup (agents, skills, commands and the GateGuard hook) is install
 
 Three people, each running their own sessions. Per person, keep it to 2–3 sessions at a time (more burns usage fast), each in its own worktree (desktop app: new session → Local → worktree). `.worktreeinclude` copies the env files into new worktrees. Stay inside your assigned area and don't edit files owned by another session:
 
-- **[Name] — Engine:** `packages/engine/` (world model, routes, fire, crowd sim)
+- **Lincoln (leaning) — Engine:** `packages/engine/` (world model, routes, fire, crowd sim)
 - **[Name] — Agents and API:** `apps/agents/`, `apps/api/`, Supabase
 - **[Name] — Web:** `apps/web/` (viewer, map, report)
 - **[Who] — Non-code:** pitch deck, README, demo script, Devpost

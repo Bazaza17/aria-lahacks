@@ -36,21 +36,22 @@ function Globe() {
       return [v[0] / m, v[1] / m, v[2] / m];
     })();
 
-    // Set initial angle so Miami (lng -80.19) faces front at startup.
-    // theta = (lng + 180 + angle) * π/180; want sin(theta) ≈ 1 → theta ≈ π/2 → angle ≈ -99.81 + 90 = offset below.
-    let angle = -9.81; // shifts Miami to ~90° theta so uz is maximised at t=0
+    // Set initial angle so Los Angeles (lng -118.24) faces front at startup.
+    // theta = (lng + 180 + angle) * π/180; want sin(theta) ≈ 1 → theta ≈ π/2 → angle ≈ 90 - 61.76 = offset below.
+    let angle = 28.24; // shifts Los Angeles to ~90° theta so uz is maximised at t=0
 
     const cities: [number, number, string][] = [
-      [25.77, -80.19, "MIAMI"],
-      [27.95, -82.46, "TAMPA"],
-      [29.95, -90.07, "NEW ORLEANS"],
-      [32.79, -79.94, "CHARLESTON"],
+      [34.05, -118.24, "LOS ANGELES"],
+      [47.61, -122.33, "SEATTLE"],
+      [39.74, -104.99, "DENVER"],
+      [30.27, -97.74, "AUSTIN"],
     ];
 
     function project(lat: number, lng: number, cx: number, cy: number, r: number) {
       const phi = (90 - lat) * (Math.PI / 180);
       const theta = (lng + 180 + angle) * (Math.PI / 180);
-      const ux = Math.sin(phi) * Math.cos(theta);
+      // Negated so east draws to the right of west (otherwise the globe is mirrored).
+      const ux = -Math.sin(phi) * Math.cos(theta);
       const uy = Math.cos(phi);
       const uz = Math.sin(phi) * Math.sin(theta);
       return { ux, uy, uz, sx: cx + ux * r, sy: cy - uy * r };
@@ -76,10 +77,10 @@ function Globe() {
         const theta1 = (lng1 + 180 + angle) * (Math.PI / 180);
         const phi2 = (90 - lat2) * (Math.PI / 180);
         const theta2 = (lng2 + 180 + angle) * (Math.PI / 180);
-        const ax = Math.sin(phi1) * Math.cos(theta1);
+        const ax = -Math.sin(phi1) * Math.cos(theta1);
         const ay = Math.cos(phi1);
         const az = Math.sin(phi1) * Math.sin(theta1);
-        const bx = Math.sin(phi2) * Math.cos(theta2);
+        const bx = -Math.sin(phi2) * Math.cos(theta2);
         const by = Math.cos(phi2);
         const bz = Math.sin(phi2) * Math.sin(theta2);
         // Linear interp then normalize (approximate great circle)
@@ -175,12 +176,12 @@ function Globe() {
         }
       }
 
-      // ── Great-circle arcs from Miami to other cities ──
-      const miamiCity = cities[0];
+      // ── Great-circle arcs from Los Angeles to other cities ──
+      const originCity = cities[0];
       cities.slice(1).forEach(([lat, lng]) => {
         const p = project(lat, lng, cx, cy, r);
         if (p.uz > -0.1) {
-          drawArc(miamiCity[0], miamiCity[1], lat, lng, cx, cy, r, 0.18);
+          drawArc(originCity[0], originCity[1], lat, lng, cx, cy, r, 0.18);
         }
       });
 
@@ -353,14 +354,14 @@ export default function LandingPage() {
         >
           <Globe />
           <AlertCard
-            title="STRUCTURAL ALERT"
-            place="MIAMI"
+            title="STRUCTURE FIRE"
+            place="WESTWOOD"
             className="right-[20%] top-[26%]"
             delay={0.9}
           />
           <AlertCard
-            title="SURGE WATCH"
-            place="MIAMI BEACH"
+            title="RED FLAG WARNING"
+            place="LOS ANGELES"
             className="right-[5%] top-[48%]"
             delay={1.3}
           />
@@ -396,9 +397,9 @@ export default function LandingPage() {
             transition={{ duration: 0.7, delay: 0.25 }}
             className="mt-7 max-w-xl text-lg leading-relaxed text-white/55"
           >
-            {BRAND.name} runs an AI agent against every building — Street View, FEMA flood zones,
-            surge maps, nearby assets — and produces a 30-second size-up a battalion chief can act
-            on.
+            {BRAND.name} turns a phone scan of a building into a fire pre-plan: how fire spreads
+            room by room, which exits stay open, how long everyone takes to get out, and a size-up a
+            battalion chief can act on.
           </motion.p>
           <motion.div
             initial={{ opacity: 0, y: 16 }}
@@ -448,11 +449,15 @@ export default function LandingPage() {
             <h2 className="mb-7 text-4xl font-medium leading-[1.1] tracking-tight md:text-5xl">
               Firefighters size up on the curb.
             </h2>
+            {/* Sources: CAL FIRE incident pages for the Palisades and Eaton fires (6,845 + 9,419
+                structures destroyed); Governor's proclamation, Jan 2026 (31 lives lost); LAFD
+                "Our Mission" page (470,274 incidents in 2021); NFPA US Fire Department Profile
+                2020 (29,452 departments); LA County 2023 building footprints layer (3,310,548). */}
             <p className="mb-6 leading-relaxed text-white/50">
-              When Hurricane Helene hit Florida in 2024, Miami-Dade Fire Rescue ran over{" "}
-              <span className="text-white/80">3,000 calls in 72 hours</span>. For most buildings
-              they responded to, they had zero pre-incident information — no structural data, no
-              flood risk, nothing.
+              In January 2025 the Palisades and Eaton fires destroyed{" "}
+              <span className="text-white/80">more than 16,000 structures</span> across Los Angeles
+              County and took 31 lives. On every call, crews still walk into buildings they have
+              never been inside, with no plan for how the fire will move or which exits will hold.
             </p>
             <p className="leading-relaxed text-white/50">
               Crews get <span className="text-white/80">60 seconds</span> to size up an unfamiliar
@@ -461,8 +466,8 @@ export default function LandingPage() {
             </p>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <StatCard value="3,000+" label="calls in 72 hrs during Hurricane Helene" />
-            <StatCard value="~0" label="buildings with pre-incident plans in Miami-Dade" />
+            <StatCard value="16,000+" label="structures destroyed in the January 2025 LA fires" />
+            <StatCard value="470K+" label="incidents LAFD answered in 2021" />
             <StatCard value="60s" label="average on-scene size-up window" />
             <StatCard value="30s" label={`${BRAND.name}'s size-up, ready before dispatch`} />
           </div>
@@ -479,19 +484,19 @@ export default function LandingPage() {
             <Step
               n="01"
               title="Scan the building"
-              body="Capture a LiDAR scan with a phone. Polycam exports a USDZ mesh in minutes."
+              body="Capture a LiDAR scan with a phone. Polycam exports a 3D mesh in minutes."
             />
             <div className="h-px bg-white/[0.06]" />
             <Step
               n="02"
               title="Agent synthesizes the intel"
-              body="Claude runs a multi-step tool-use loop — Street View, FEMA flood zones, NOAA surge data, nearby infrastructure — and produces a structured report."
+              body="The scan and floor plan become a building model. Fire and smoke spread through it room by room while agents route every room to every exit and write a structured report."
             />
             <div className="h-px bg-white/[0.06]" />
             <Step
               n="03"
               title="Chief gets the size-up"
-              body="Headline risk, immediate actions, and a storm-surge slider that floods the 3D scan and shows which exits stay open."
+              body="Headline risk, immediate actions, and the 3D scan showing how the fire moves, which exits stay open and how long the building takes to clear."
             />
             <div className="h-px bg-white/[0.06]" />
             <Step
@@ -530,13 +535,13 @@ export default function LandingPage() {
             Every building in every city.
           </h2>
           <p className="mb-14 max-w-xl leading-relaxed text-white/50">
-            Miami-Dade is the wedge. The architecture scales to any city, any building type, any
+            Los Angeles is the wedge. The architecture scales to any city, any building type, any
             risk profile.
           </p>
           <div className="mb-14 grid gap-6 md:grid-cols-3">
-            <StatCard value="30,000+" label="fire departments in the United States" />
+            <StatCard value="29,000+" label="fire departments in the United States" />
             <StatCard value="130M+" label="buildings in the US addressable by this system" />
-            <StatCard value="700k+" label="structures in Miami-Dade County alone" />
+            <StatCard value="3.3M" label="buildings mapped in Los Angeles County alone" />
           </div>
           <div className="grid gap-8 border-t border-white/[0.06] pt-12 md:grid-cols-3">
             <div>
@@ -553,8 +558,8 @@ export default function LandingPage() {
                 EMERGENCY MANAGEMENT
               </div>
               <p className="text-sm leading-relaxed text-white/50">
-                Pre-plan entire neighborhoods before hurricane season. Drag the scenario slider to
-                see exactly what 6 ft of surge looks like inside a specific building.
+                Pre-plan schools, venues and high-occupancy buildings before fire season. See how a
+                fire would move through a specific building and how long it takes to clear.
               </p>
             </div>
             <div>

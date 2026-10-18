@@ -455,11 +455,11 @@ export function BuildingScan({
           <div>
             <p className="text-red-300/90">NO LIDAR SCAN · WRONG BUILDING ID</p>
             <p className="mt-3 text-white/40">
-              git pull origin main
+              upload the scan to the scans bucket
               <br />
-              run infra/supabase/migrations/0003_the_dock.sql
+              add its URL for this building in BuildingScan.tsx
               <br />
-              open The Dock from dashboard
+              open the venue from dashboard
             </p>
           </div>
         </div>

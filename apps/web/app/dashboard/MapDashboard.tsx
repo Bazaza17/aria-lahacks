@@ -17,6 +17,8 @@ type PopoverState = {
 } | null;
 
 const VENUE_MATCH_DEG = 0.0005; // ~55m at this latitude
+// James West Alumni Center, UCLA. Used until the venue row loads from Supabase.
+const VENUE_FALLBACK_CENTER: [number, number] = [-118.44520289359974, 34.07026948117506];
 
 export function MapDashboard({
   buildings,
@@ -45,7 +47,7 @@ export function MapDashboard({
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: "mapbox://styles/mapbox/dark-v11",
-      center: [-80.20217163896397, 25.801267443503537],
+      center: primary ? [primary.lng, primary.lat] : VENUE_FALLBACK_CENTER,
       zoom: 17,
       pitch: 60,
       bearing: -20,
@@ -277,7 +279,7 @@ export function MapDashboard({
           <span className="text-white/25">·</span>
           <span className="text-white/60">DASHBOARD</span>
           <span className="text-white/25">·</span>
-          <span className="text-white/60">MIAMI-DADE</span>
+          <span className="text-white/60">LOS ANGELES</span>
         </div>
       </div>
 

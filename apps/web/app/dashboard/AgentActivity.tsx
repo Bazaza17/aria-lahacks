@@ -59,7 +59,7 @@ export function AgentActivity({
       </div>
 
       <div className="whitespace-nowrap border-t border-white/[0.08] px-4 py-2 font-mono text-[10px] tracking-[0.18em] text-white/40">
-        {preplanCount} PRE-PLAN{preplanCount === 1 ? "" : "S"} · MIAMI-DADE
+        {preplanCount} PRE-PLAN{preplanCount === 1 ? "" : "S"} · LOS ANGELES
       </div>
     </aside>
   );

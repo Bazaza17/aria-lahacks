@@ -8,7 +8,7 @@ export const BRAND = {
   name: "Aria",
   tagline: "Pre-incident world models for first responders",
   description:
-    "Pre-incident plans for Miami first responders facing hurricane, surge, and flood scenarios.",
+    "Fire pre-plans for Los Angeles first responders: how fire spreads through a building, which exits stay open, and how long it takes to clear.",
 } as const;
 
 /**

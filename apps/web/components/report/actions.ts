@@ -88,12 +88,12 @@ export function generateActions(report: PreplanReport): ActionItem[] {
     {
       id: "standby",
       label: "STANDBY · MONITOR CONDITIONS",
-      sublabel: "Watch NHC advisories + Miami-Dade EOC updates",
+      sublabel: "Watch NWS fire-weather alerts + LA County OEM updates",
       priority: "MODERATE",
     },
     {
       id: "comms",
-      label: "MAINTAIN COMMS WITH MIAMI-DADE FIRE RESCUE",
+      label: "MAINTAIN COMMS WITH LAFD",
       sublabel: "Tactical channel 7 · 5-minute check-ins",
       priority: "MODERATE",
     },
