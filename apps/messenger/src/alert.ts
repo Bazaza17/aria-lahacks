@@ -1,7 +1,7 @@
 import { sendText } from "./photon.ts";
 import { resetAgent, type AgentContext } from "./eleven.ts";
-import { venue, routeFor, renderVenue } from "./venue.ts";
-import { liveContext, rememberApproved } from "./aria-live.ts";
+import { venue, routeFor, renderVenue, BUILDING_ID } from "./venue.ts";
+import { liveContext, rememberInstruction } from "./aria-live.ts";
 
 export type Contact = { handle: string; spaceId: string; agentId: string };
 
@@ -12,9 +12,9 @@ export const contacts = new Map<string, Contact>();
 export type AlertInput = {
   phone: string; // E.164, e.g. +14155551234
   name?: string;
-  floor?: number; // the person's floor; picks their route from venue.ts
+  floor?: number; // the person's floor
   originFloor?: number; // where the fire is
-  route?: string; // override the venue route
+  route?: string; // the route to give; default: the generic "nearest lit exit sign" line
   drill?: boolean;
 };
 
@@ -36,15 +36,21 @@ export function agentContext(phone: string): AgentContext {
     venue: renderVenue(),
     name: a?.name ?? "there",
     floor: a?.floor === undefined ? "unknown" : String(a.floor),
-    incident: a ? `fire reported on floor ${a.originFloor}` : "no active incident",
-    is_drill: String(a?.drill ?? true),
+    incident: a ? `fire reported on floor ${a.originFloor}` : "no active incident known",
+    is_drill: a ? String(a.drill) : "unknown", // Aria's live layer overrides this per person
     route: a?.route ?? routeFor(undefined),
     last_instruction: a?.text ?? "none yet",
     summary: a ? `Alerted by text about a fire on floor ${a.originFloor}.` : "No alert sent yet.",
     phone, // for the update_aria tool only; the prompt never shows it
-    building_id: process.env.ARIA_BUILDING_ID ?? "none",
+    building_id: BUILDING_ID,
     ...liveContext(phone), // the dispatcher-approved route from Aria's live layer, when there is one
   };
+}
+
+/** The incident is over (Aria's evacuation.ended): drop their alert and start a fresh agent session. */
+export function forgetAlert(phone: string) {
+  lastAlert.delete(phone);
+  resetAgent(phone);
 }
 
 export class NotRegisteredError extends Error {}
@@ -73,7 +79,7 @@ export async function sendInstruction(phone: string, text: string) {
   const contact = contacts.get(phone);
   if (!contact) throw new NotRegisteredError(`${phone} hasn't texted the line yet, so Photon can't message them first`);
   const sent = await sendText(contact, text);
-  rememberApproved(phone, text);
+  rememberInstruction(phone, text);
   resetAgent(phone); // the next reply starts a fresh agent session with this instruction as context
   return { to: phone, text, status: sent.status };
 }

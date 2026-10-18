@@ -1,11 +1,14 @@
 // Create the ElevenLabs agent (first run) or update it from src/agent-prompt.ts,
 // uploading every knowledge/*.md file to its knowledge base first.
 // With ARIA_PUBLIC_URL (Aria's API, reachable from ElevenLabs) and ARIA_TOOL_SECRET, it also registers
-// the update_aria live-update webhook; the secret goes into ElevenLabs' secret store, not the config.
+// the update_aria live-update webhook and the log_incident_details webhook (calls people make to the
+// number); the secret goes into ElevenLabs' secret store, not the config.
+// With ARIA_LIVE_URL, the agent's default {{venue}} is the API's building brief (else src/venue.ts).
 // First run appends ELEVENLABS_AGENT_ID to .env.
 import { appendFileSync, readdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { agentConfig, ariaTool } from "../src/agent-prompt.ts";
+import { agentConfig, ariaTool, incidentTool } from "../src/agent-prompt.ts";
+import { refreshBrief, renderVenue } from "../src/venue.ts";
 
 const key = process.env.ELEVENLABS_API_KEY;
 if (!key) throw new Error("Set ELEVENLABS_API_KEY in .env");
@@ -50,20 +53,27 @@ if (ariaUrl && toolSecret) {
     method: stored ? "PATCH" : "POST",
     body: JSON.stringify({ type: stored ? "update" : "new", name: SECRET, value: toolSecret }),
   });
-  const tool_config = ariaTool(ariaUrl, secret.secret_id);
   const { tools } = await call<{ tools: { id: string; tool_config: { name: string } }[] }>("/tools?page_size=100");
-  const found = tools.find((t) => t.tool_config.name === tool_config.name);
-  const saved = await call<{ id: string }>(found ? `/tools/${found.id}` : "/tools", {
-    method: found ? "PATCH" : "POST",
-    body: JSON.stringify({ tool_config }),
-  });
-  toolIds.push(saved.id);
-  console.log(`tool: ${tool_config.name} -> ${tool_config.api_schema.url} (${saved.id})`);
+  for (const tool_config of [ariaTool(ariaUrl, secret.secret_id), incidentTool(ariaUrl, secret.secret_id)]) {
+    const found = tools.find((t) => t.tool_config.name === tool_config.name);
+    const saved = await call<{ id: string }>(found ? `/tools/${found.id}` : "/tools", {
+      method: found ? "PATCH" : "POST",
+      body: JSON.stringify({ tool_config }),
+    });
+    toolIds.push(saved.id);
+    console.log(`tool: ${tool_config.name} -> ${tool_config.api_schema.url} (${saved.id})`);
+  }
 } else {
-  console.warn("ARIA_PUBLIC_URL or ARIA_TOOL_SECRET not set: no live-update tool, calls only report after hang-up");
+  console.warn("ARIA_PUBLIC_URL or ARIA_TOOL_SECRET not set: no live-update or incident tools, calls only report after hang-up");
 }
 
 const config = structuredClone(agentConfig);
+if (await refreshBrief()) {
+  config.conversation_config.agent.dynamic_variables.dynamic_variable_placeholders.venue = renderVenue();
+  console.log("venue: the API's building brief");
+} else {
+  console.log("venue: the static facts in src/venue.ts");
+}
 (config.conversation_config.agent.prompt as Record<string, unknown>).knowledge_base = knowledgeBase;
 (config.conversation_config.agent.prompt as Record<string, unknown>).tool_ids = toolIds;
 

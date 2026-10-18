@@ -1,42 +1,39 @@
-# James West Alumni Center: Emergency Procedures
+# James West Alumni Center: General Fire Safety Guidance
 
-SAMPLE DOCUMENT for the hackathon demo. Not official UCLA policy; replace with the real procedures.
+General fire-safety guidance for the hackathon demo. Not official UCLA policy.
+This document names no places in the building on purpose. Which way to go, which exit to use and
+where to meet always come from Aria's live instruction (the dispatcher-approved route) and from
+staff and responders on site. If a question needs a place this document and the layout don't
+give, say you don't know and tell them to follow the nearest lit exit sign that is clear of smoke,
+and staff and responders' directions.
 
 ## Fire
 - When the fire alarm sounds, leave the building right away. Do not stop to collect belongings.
-- Never use the elevator during a fire. It is recalled to the ground floor when the alarm sounds.
-- Before opening a door, touch it with the back of your hand. If it is hot, do not open it; use another route.
+- Elevators are not used in an evacuation. Use stairs and exit doors.
+- Before opening a door, touch it with the back of your hand. If it is hot, do not open it; use another way out.
 - If there is smoke, stay low, below the smoke, and cover your nose and mouth with cloth.
 - Close doors behind you to slow the spread of fire and smoke.
-- If you can't get out, close the door, put cloth under it, call 911 and tell them your exact location, and signal from a window.
-- Do not re-enter the building until the fire department or event staff say it is safe.
+- If you can't get out: close the door, put cloth under it, call 911 and tell them your exact location, and signal from a window. Reply HELP to Aria's text so a responder is told.
+- Do not re-enter the building until the fire department or staff say it is safe.
 
-## Event staff
-- During events, event staff wear orange vests. They sweep each floor and check restrooms during an evacuation.
-- The event lead carries a radio and takes a headcount at the assembly point (north lawn).
-- Report anyone missing to event staff at the assembly point, not by going back inside.
+## People who can't use stairs or steps
+- No exit is confirmed step-free, and this document lists no area of refuge or evacuation equipment.
+- Reply HELP to Aria's text (or call 911) and say exactly where you are, so a responder is told.
+- Move away from smoke and fire if you can, and close the door between you and it.
 
 ## Safety equipment
-- AED (defibrillator): main lobby, on the wall next to the reception desk.
-- First aid kits: main lobby reception desk and the floor 2 catering pantry.
-- Fire extinguishers: by each stairwell door on every floor, and in the kitchen.
-- Evacuation chair (for carrying someone down stairs): floor 2 landing of Stairwell A, next to the area of refuge. Only trained staff or firefighters should use it.
-
-## People who can't use stairs
-- Go to the area of refuge: the floor 2 landing of Stairwell A. It has fire-rated doors and an emergency call box.
-- Use the call box or call 911 to report your location. Firefighters check areas of refuge first.
-- A friend may wait with you, but should leave if told to by responders.
-- On floor 1, all three exits are step-free.
+- This document does not list where defibrillators (AEDs), first-aid kits or fire extinguishers are. If someone asks, say you don't know their locations and tell them to ask staff or call 911.
 
 ## Injuries
-- For serious injuries, call 911 first, then tell event staff.
+- For serious injuries, call 911 first, then tell staff.
 - Do not move someone with a possible neck or back injury unless they are in immediate danger.
-- For burns, cool with clean running water for 20 minutes if it is safe to do so.
+- For burns, cool with clean, cool running water for 20 minutes if it is safe to do so.
 
 ## Pets and service animals
 - Service animals evacuate with their handler. Pets may be carried or leashed out; do not go back for a pet.
 
 ## After evacuating
-- Go to the north lawn across from Pauley Pavilion and check in with event staff.
-- Stay at least 50 feet from the building and keep the paths clear for fire trucks.
+- Go outside, away from the building, where staff direct you.
+- Stay well clear of the doors and keep paths clear for fire trucks.
+- Tell staff or responders outside about anyone missing; do not go back inside.
 - Reply SAFE to Aria's text once you are out.

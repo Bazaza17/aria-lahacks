@@ -1,10 +1,11 @@
 import { createServer } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
 import { listInbound, sendText, type Inbound } from "./photon.ts";
-import { contacts, sendAlert, sendInstruction, agentContext, NotRegisteredError, type AlertInput } from "./alert.ts";
+import { contacts, sendAlert, sendInstruction, agentContext, forgetAlert, NotRegisteredError, type AlertInput } from "./alert.ts";
 import { askAgent } from "./eleven.ts";
 import { startCall, getConversation, CallingNotConfiguredError } from "./voice.ts";
-import { liveEnabled, reportText, reportSent, reportCall, registerOccupants, followLive, followCall } from "./aria-live.ts";
+import { liveEnabled, reportText, reportSent, reportCall, registerOccupants, followLive, followCall, type SentBy } from "./aria-live.ts";
+import { followBrief, NO_ROUTE } from "./venue.ts";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const POLL_MS = 2_000;
@@ -16,7 +17,7 @@ function remember(m: Inbound) {
 }
 
 // Send a text, and tell Aria's live layer what was said and who wrote it (when ARIA_LIVE_URL is set).
-async function say(to: { from: string; spaceId: string; agentId: string }, text: string, by: "agent" | "aria" = "aria") {
+async function say(to: { from: string; spaceId: string; agentId: string }, text: string, by: SentBy = "aria") {
   await sendText(to, text);
   if (liveEnabled) void reportSent(to.from, text, by);
 }
@@ -30,6 +31,13 @@ async function handleInbound(m: Inbound) {
 
   if (isNew) {
     if (liveEnabled) void registerOccupants([{ phone: m.from }]);
+    // During an evacuation, a first-time texter gets Aria's live instruction, not "we'll text you".
+    const now = live?.answer ?? live?.instruction?.message;
+    if (now) {
+      await say(m, now);
+      console.log(`[messenger] out live instruction to new contact ${m.from}`);
+      return;
+    }
     await say(m, "You're registered for Aria emergency alerts at James West Alumni Center. We'll text you here if there's an incident.");
     console.log(`[messenger] out registration to ${m.from}`);
     return;
@@ -54,17 +62,20 @@ async function handleInbound(m: Inbound) {
   }
 
   // Anything else: the ElevenLabs agent answers, with the approved route as its only layout facts.
-  let reply: string, by: "agent" | "aria" = "agent";
+  let reply: string, by: SentBy = "agent";
   const started = Date.now();
   try {
     reply = await askAgent(m.from, m.text, agentContext(m.from));
     console.log(`[messenger] agent replied in ${Date.now() - started}ms`);
   } catch (err) {
-    console.error("[messenger] agent failed, using fallback:", err instanceof Error ? err.message : err);
-    by = "aria";
-    reply =
-      live?.instruction?.message ?? // the dispatcher-approved route, when an evacuation is on
-      "Follow the nearest lit exit sign and responders' directions. Reply HELP if you need a person, or call 911 if you're in danger.";
+    const approved = live?.instruction?.message; // the dispatcher-approved route, when an evacuation is on
+    // Aria's approved text is Aria's; the canned line is the messenger's own fallback, tagged as such.
+    by = approved ? "aria" : "fallback";
+    reply = approved ?? `${NO_ROUTE} Reply HELP if you need a person, or call 911 if you're in danger.`;
+    console.error(
+      `[messenger] agent failed, sending ${approved ? "Aria's approved instruction" : "the fallback text"}:`,
+      err instanceof Error ? err.message : err,
+    );
   }
   await say(m, reply, by);
   console.log(`[messenger] out reply to ${m.from}`);
@@ -100,20 +111,34 @@ console.log(`[messenger] connected to Photon; ${contacts.size} registered contac
 
 // Aria's live layer (opt-in): who's reachable, and what the dispatcher wants sent or called.
 if (liveEnabled) {
+  followBrief(); // the building facts the agent may use, from the API (static venue.ts until then)
   void registerOccupants([...contacts.keys()].map((phone) => ({ phone })));
   void followLive({
-    text: async (phone, message, by = "aria") => {
+    text: async (phone, message, by = "aria", dispatcher) => {
+      if (!contacts.has(phone)) {
+        console.log(`[messenger] skip text to ${phone}: not a registered contact`);
+        return;
+      }
       try {
         await sendInstruction(phone, message);
-        void reportSent(phone, message, by);
-        console.log(`[messenger] out instruction to ${phone}`);
+        void reportSent(phone, message, by, dispatcher ? { dispatcher } : {});
+        console.log(`[messenger] out instruction to ${phone} (by ${by})`);
       } catch (err) {
         console.error(`[messenger] couldn't text ${phone}:`, err instanceof Error ? err.message : err);
       }
     },
     call: async (phone, reason) => {
+      // Only ever dial someone who texted this line (a registered Photon contact), never a number
+      // that merely appears in an event (e.g. simulated occupants).
+      if (!contacts.has(phone)) {
+        console.log(`[messenger] skip call to ${phone}: not a registered contact (${reason})`);
+        return;
+      }
       console.log(`[messenger] call requested for ${phone}: ${reason}`);
       await placeCall(phone).catch((err) => console.error(`[messenger] call to ${phone} failed:`, err instanceof Error ? err.message : err));
+    },
+    ended: (phones) => {
+      for (const phone of new Set([...phones, ...contacts.keys()])) forgetAlert(phone);
     },
     handoff: async (phone) => {
       const c = contacts.get(phone);

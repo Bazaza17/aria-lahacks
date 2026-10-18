@@ -5,8 +5,9 @@
 // Never blocks texting: if the API is down, the messenger carries on as before.
 // Contract: docs/creao-layer.md.
 
+import { BUILDING_ID as BUILDING } from "./venue.ts";
+
 const { ARIA_LIVE_URL, ARIA_TOOL_SECRET } = process.env;
-const BUILDING = process.env.ARIA_BUILDING_ID ?? "547b5ec5-30c5-4f76-8080-012a52e90bd9"; // James West Alumni Center
 
 export const liveEnabled = Boolean(ARIA_LIVE_URL);
 
@@ -18,9 +19,33 @@ export type LiveReply = {
   route_change_pending?: boolean;
 };
 
-// Each person's dispatcher-approved route (what the agent may repeat) and the last thing Aria sent them.
+// Each person's dispatcher-approved route (what the agent may repeat) and the last live-layer
+// instruction texted to them (an alert, a route change, a dispatcher re-send). Only the current
+// evacuation fills these, and evacuation.ended clears them; registration lines and the agent's own
+// replies never count as an instruction.
 const approved = new Map<string, string>();
 const lastSent = new Map<string, string>();
+// What Aria told us about each person: their name, and whether their evacuation is a drill.
+const people = new Map<string, { name?: string; drill?: boolean }>();
+
+/** Who sent a text: the ElevenLabs agent, Aria (its rules or an approved route), a dispatcher, or the
+ *  messenger's own canned fallback when the agent failed (never passed off as Aria's). */
+export type SentBy = "agent" | "aria" | "dispatcher" | "fallback";
+
+/** A drill flag from an event: explicit "drill", else the evacuation mode, else the message's prefix. */
+function drillOf(d: { drill?: unknown; mode?: unknown; message?: unknown }): boolean | undefined {
+  if (typeof d.drill === "boolean") return d.drill;
+  if (typeof d.mode === "string") return d.mode !== "live";
+  if (typeof d.message === "string" && d.message.trim()) return /^\s*DRILL\b/i.test(d.message);
+  return undefined;
+}
+
+export function rememberPerson(phone: string, info: { name?: unknown; drill?: boolean }) {
+  const prev = people.get(phone) ?? {};
+  const name = typeof info.name === "string" && info.name.trim() ? info.name.trim() : prev.name;
+  const drill = info.drill ?? prev.drill;
+  people.set(phone, { ...(name ? { name } : {}), ...(drill !== undefined ? { drill } : {}) });
+}
 
 const headers = () => ({ "content-type": "application/json", ...(ARIA_TOOL_SECRET ? { "x-tool-secret": ARIA_TOOL_SECRET } : {}) });
 
@@ -55,14 +80,17 @@ function event(eventType: string, payload: Record<string, unknown>, eventId = ne
 export async function reportText(phone: string, text: string, photonMessageId: string): Promise<LiveReply | null> {
   const res = await event("sms.received", { phone, text }, `photon:${photonMessageId}`);
   const reply = (res?.reply ?? null) as LiveReply | null;
-  if (reply?.instruction?.message) approved.set(phone, reply.instruction.message);
+  if (reply?.instruction?.message) {
+    approved.set(phone, reply.instruction.message);
+    rememberPerson(phone, { name: res?.occupant?.name, drill: drillOf({ ...reply, message: reply.instruction.message }) });
+  }
   return reply;
 }
 
-/** A text we sent: by the ElevenLabs agent, by Aria's rules / an approved route, or a dispatcher re-send. */
-export function reportSent(phone: string, text: string, by: "agent" | "aria" | "dispatcher" = "aria") {
-  lastSent.set(phone, text);
-  return event("sms.sent", { phone, text, by });
+/** A text we sent: by the ElevenLabs agent, by Aria's rules / an approved route, a dispatcher re-send,
+ *  or the messenger's fallback when the agent failed. */
+export function reportSent(phone: string, text: string, by: SentBy = "aria", extra: Record<string, unknown> = {}) {
+  return event("sms.sent", { phone, text, by, ...(by === "fallback" ? { fallback: true } : {}), ...extra });
 }
 
 type CallEvent = "call.started" | "call.transcript" | "call.transferred" | "call.ended";
@@ -75,19 +103,32 @@ export function registerOccupants(people: { phone: string; name?: string }[]) {
   return post(`/live/buildings/${BUILDING}/occupants`, { people });
 }
 
-/** Extra agent context from the live layer: the route the dispatcher approved for this person. */
+/** Extra agent context from the live layer: the route the dispatcher approved for this person in the
+ *  current evacuation. Without one, nothing here claims there is an incident. */
 export function liveContext(phone: string): Record<string, string> {
-  const route = approved.get(phone), last = lastSent.get(phone);
-  if (!route && !last) return {};
+  const route = approved.get(phone), who = people.get(phone);
   return {
-    ...(route ? { route } : {}),
-    last_instruction: last ?? route!,
-    incident: "fire reported (see last_instruction)",
+    ...(who?.name ? { name: who.name } : {}),
+    ...(who?.drill !== undefined ? { is_drill: String(who.drill) } : {}),
+    ...(route
+      ? { route, last_instruction: lastSent.get(phone) ?? route, incident: "fire reported (see last_instruction)" }
+      : {}),
   };
 }
 
-export function rememberApproved(phone: string, message: string) {
-  approved.set(phone, message);
+/** A live-layer instruction we just texted this person (alert, approved route change, dispatcher re-send). */
+export function rememberInstruction(phone: string, message: string) {
+  lastSent.set(phone, message);
+  if (!approved.has(phone)) approved.set(phone, message);
+}
+
+/** The evacuation is over: forget every route, instruction and drill flag. Returns who had one. */
+function endEvacuation(): string[] {
+  const phones = [...new Set([...approved.keys(), ...lastSent.keys(), ...people.keys()])];
+  approved.clear();
+  lastSent.clear();
+  people.clear();
+  return phones;
 }
 
 export type CallLine = {
@@ -144,11 +185,13 @@ export async function followCall(phone: string, conversationId: string, fetchCon
 
 export type LiveHandlers = {
   /** Text this person this exact message (an alert, an approved route change, a dispatcher re-send). */
-  text: (phone: string, message: string, by?: "aria" | "dispatcher") => Promise<void>;
+  text: (phone: string, message: string, by?: "aria" | "dispatcher", dispatcher?: string) => Promise<void>;
   /** Call this person (they didn't reply, or a CREAO agent asked). */
   call: (phone: string, reason: string) => Promise<void>;
   /** A dispatcher took over this person's call or thread. */
   handoff: (phone: string, transferTo: string | null) => Promise<void>;
+  /** The evacuation ended: these people's agent sessions and alerts are stale. */
+  ended: (phones: string[]) => void;
 };
 
 /** Listen to the live stream (streamed out of TigerData) and act on what's for us. */
@@ -182,17 +225,28 @@ export async function followLive(h: LiveHandlers) {
 async function dispatch(msg: { type?: string; data?: any }, h: LiveHandlers) {
   const d = msg.data ?? {};
   if (msg.type === "evacuation.started" || msg.type === "route.approved") {
-    for (const r of (d.recipients ?? []) as { phone: string; message: string; route?: string }[]) {
+    type Recipient = { phone: string; message: string; route?: string; name?: string; drill?: boolean };
+    for (const r of (d.recipients ?? []) as Recipient[]) {
       approved.set(r.phone, r.route ?? r.message); // the alert asks a question; the route comes with the answer
+      rememberPerson(r.phone, { name: r.name, drill: drillOf({ ...d, ...r }) });
       await h.text(r.phone, r.message);
     }
   } else if (msg.type === "occupant.message" && d.phone && d.message) {
     // One text per event: the fire alert, an approved route change, or a dispatcher's re-send.
     // The alert asks a question, so the route they may be told comes alongside it.
     approved.set(d.phone, d.route ?? d.message);
-    await h.text(d.phone, d.message, d.by === "dispatcher" ? "dispatcher" : "aria");
+    rememberPerson(d.phone, { name: d.name, drill: drillOf(d) });
+    // "by" is "aria" or "dispatcher" (initials in "dispatcher"); older APIs put the initials in "by"
+    const byDispatcher = d.by === "dispatcher" || (typeof d.by === "string" && d.by !== "aria" && d.by !== "");
+    const initials = typeof d.dispatcher === "string" ? d.dispatcher : byDispatcher && d.by !== "dispatcher" ? d.by : undefined;
+    await h.text(d.phone, d.message, byDispatcher ? "dispatcher" : "aria", initials);
   } else if (msg.type === "occupant.call_requested" && d.phone) {
+    rememberPerson(d.phone, { name: d.name, drill: drillOf(d) });
     await h.call(d.phone, d.reason ?? "follow-up call");
+  } else if (msg.type === "evacuation.ended") {
+    const phones = endEvacuation();
+    console.log(`[aria-live] evacuation ended; cleared ${phones.length} person(s)`);
+    h.ended(phones);
   } else if (msg.type === "handoff.joined" && d.caller) {
     await h.handoff(d.caller, d.transfer_to ?? null);
   }

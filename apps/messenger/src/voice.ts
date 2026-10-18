@@ -21,7 +21,7 @@ export async function startCall(phone: string, context: AgentContext) {
       agent_phone_number_id: ELEVENLABS_PHONE_NUMBER_ID,
       to_number: phone,
       conversation_initiation_client_data: {
-        dynamic_variables: { ...context, channel: "voice" },
+        dynamic_variables: { ...context, channel: "voice", call_direction: "outbound" },
         conversation_config_override: {
           agent: { first_message: `${drill}Hi ${context.name}, this is Aria, calling about the fire alert. Where are you right now?` },
         },
