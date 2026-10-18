@@ -48,6 +48,8 @@ The smallest end-to-end path: the real venue, a real fire, visible in the existi
 
 Crowd sim, agents, the report and the extra tracks come after this slice works.
 
+Later (Lincoln's idea, not urgent): in the viewer/dashboard, a layer toggle — the 3D scan, the annunciator plan image laid flat under it, and the venue graph (rooms, doors, exits, routes) — all in the same venue frame, so they line up.
+
 ## Rough time budget
 
 A sketch to argue with, not a schedule. Hacking runs 24 hours, Sat 12:00 PM to Sun 12:00 PM.
