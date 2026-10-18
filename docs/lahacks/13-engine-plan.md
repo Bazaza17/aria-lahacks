@@ -97,6 +97,24 @@ This plan combines the alignment, fire and place-lookup audits. Nothing in the r
   | At risk, everyone leaving at ignition | 0 | 301 |
 
 - Check that the single-box NFPA 92 cases don't change (they have no doors). Regenerate `examples/` and the viewer JSON.
+- **Status (Sun 18 Oct, morning): done.** `fire.py` `_Sim.step`, plus `physics.py` and `constants.py`.
+  - The default is now `SPILL_ENTRAINMENT = "balcony"`, NFPA 92 (2021) eq. 5.5.2.1, `m = 0.36 (Q W²)^(1/3) (z_b + 0.25 H)`. It treats the opening as a line source, which suits the 3.3 m and 9.3 m archways into the atrium.
+  - `"axisymmetric"` (the point-plume continuation, which ignores opening width) is kept as the lower estimate, and `"off"` is the old behaviour. Pick one with `simulate(..., spill_entrainment=)` or `python -m engine.fire --spill`.
+  - Two changes from the audit's scratch patch: the fire's heat is shared between the openings in proportion to their flow, and no air is entrained until a door actually spills.
+  - Fast fire in 140 (engine.demo; at-risk counts are plan/reactive):
+
+    | Result | Off (old) | Axisymmetric | NFPA 92 (default) |
+    |---|---|---|---|
+    | First untenable beyond origin (2F landing_200st) | 4:18 | 2:08 | 1:16 |
+    | 219 / 210_sw / 210_n | 4:33 / 4:49 / 5:00 | 2:29 / 2:48 / 3:03 | 1:31 / 1:44 / 1:53 |
+    | 150 / galleria far end / 110 | 7:15 / 8:29 / 9:03 | 5:30 / 6:17 / 7:05 | 3:52 / 5:00 / 6:03 |
+    | First flashover (room:140+150) | 10:14 | 8:59 | 8:28 |
+    | At risk, leave at 0:00 / 1:00 / 2:00 | 0/92, 0/158, 208/354 | 163/264, 301/360, 453/586 | 294/352, 455/487, 535/633 |
+
+  - A fire in 110 (inside the atrium) barely changes: first untenable is still 1:49, and other spaces are 5-20 s earlier.
+  - Hand checks: the single-box NFPA 92 filling checks are unchanged (atrium 251 s, Founders' 137 s, 140+150 168 s), and so are Thomas and door flow. MQH for Collins matches to 5:00. At 7:00 it reads hotter (277 °C against a 179-243 °C band) because the atrium has filled past the soffit and the room no longer vents. That is close to the 8:28 flashover.
+  - Known limit: the plume equations also apply to weak early fires. In a 100G fire, stair ST-NE-1 is now lost at 0:21 instead of 1:24. Treat stair-shaft times from small fires as conservative.
+  - Test: `tests/test_spill_plume.py` (the 2F time in a 140 fire must stay within 60-105 s).
 
 **5. "Find a place" in the viewer, with pins snapped to the scan: 90 min (Lane B)**
 - Start now against a stub `places.json`. Swap in the real file at about T+2:05, when task 3 lands.

@@ -37,9 +37,10 @@ export default async function BuildingPage({ params }: { params: Promise<{ id: s
           {/* The live dispatch console, served by the API through this app's /live proxy. */}
           <a
             href="/live/view"
+            title="Texts, calls and the CREAO agents, live. Anyone can run a drill."
             className="flex h-[30px] items-center bg-white px-4 text-[13px] text-ink transition-colors hover:bg-rule-light"
           >
-            Live console ↗
+            Live response ↗
           </a>
         </div>
       </header>

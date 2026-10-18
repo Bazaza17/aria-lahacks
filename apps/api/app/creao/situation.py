@@ -8,6 +8,8 @@ the roll call, hazards, the approved routes and the route changes waiting for a 
 flow() reads the evac_flow_15s continuous aggregate on TigerData (raw evac_events elsewhere).
 """
 
+import re
+from collections.abc import Iterable
 from datetime import timedelta
 from typing import Any
 
@@ -30,6 +32,89 @@ from app.creao.models import (
 )
 
 LOOKBACK = timedelta(hours=12)
+
+# ---------------------------------------------------------------- the public view (open drills)
+# Without a dispatcher key the console still works, but nobody's phone number or surname leaves
+# the API: numbers become "•••• 1234" and people keep only their first name.
+# +E.164-ish numbers, and unprefixed ones of 10+ digits ("(310) 555-0142", "3105550142")
+_PHONE = re.compile(
+    r"\+\d[\d\s().-]{6,18}\d"
+    r"|(?<![\w+])\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?![\w])"
+    r"|(?<![\w+])\d{10,15}(?![\w])"
+)
+_EMAIL = re.compile(r"[\w.+-]+@([\w-]+\.[\w.-]+)")
+# Fields that always hold a contact handle (a phone number, or an iMessage email)
+_CONTACT_KEYS = {"phone", "caller", "caller_id", "called_number"}
+# Fields that hold a handle in messages but a place elsewhere (a route's from/to)
+_MAYBE_CONTACT_KEYS = {"from", "to"}
+# A caller who isn't registered introducing themselves in a transcript: keep the first name only
+_INTRO = re.compile(
+    r"\b((?:[Mm]y name is|[Tt]his is|I'm|I am|[Nn]ame's)\s+[A-Z][a-z]+)\s+[A-Z][\w'-]+"
+)
+_PERSON_KEYS = {"phone", "mobility", "last_instruction", "told_exit_id", "no_reply_secs"}
+
+
+def mask_phone(value: str) -> str:
+    digits = re.sub(r"\D", "", value)
+    return f"•••• {digits[-4:]}" if len(digits) >= 4 else "••••"
+
+
+def mask_contact(value: str) -> str:
+    """Any contact handle, whatever its shape: an email keeps its domain, a number its last 4."""
+    if "@" in value:
+        return _EMAIL.sub(lambda m: f"•••@{m.group(1)}", value) if _EMAIL.search(value) else "••••"
+    return mask_phone(value)
+
+
+def _first(name: str) -> str:
+    return name.split()[0] if name.split() else name
+
+
+def _names(obj: Any, found: set[str]) -> set[str]:
+    """Full names (two words or more) of the people anywhere in a payload."""
+    if isinstance(obj, dict):
+        name = obj.get("name")
+        if isinstance(name, str) and len(name.split()) > 1 and _PERSON_KEYS & obj.keys():
+            found.add(name)
+        for v in obj.values():
+            _names(v, found)
+    elif isinstance(obj, list):
+        for v in obj:
+            _names(v, found)
+    return found
+
+
+def mask_public(payload: Any, names: Iterable[str] = ()) -> Any:
+    """A copy of a payload safe for the public console: phone numbers masked everywhere (fields and
+    free text), people's names cut to their first name (in their record and in any text)."""
+    full = sorted(_names(payload, set()) | {n for n in names if n and len(n.split()) > 1}, key=len)
+    swaps = [(n, _first(n)) for n in reversed(full)]  # longest first
+
+    def text(s: str) -> str:
+        s = _PHONE.sub(lambda m: mask_phone(m.group()), s)
+        s = _EMAIL.sub(lambda m: f"•••@{m.group(1)}", s)
+        s = _INTRO.sub(r"\1", s)
+        for n, first in swaps:
+            s = s.replace(n, first)
+        return s
+
+    def walk(obj: Any, key: str | None = None, person: bool = False) -> Any:
+        if isinstance(obj, dict):
+            is_person = bool(_PERSON_KEYS & obj.keys())
+            return {k: walk(v, k, is_person) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [walk(v, key) for v in obj]
+        if isinstance(obj, str):
+            if obj and key in _CONTACT_KEYS:
+                return mask_contact(obj)
+            if key in _MAYBE_CONTACT_KEYS and ("@" in obj or sum(c.isdigit() for c in obj) >= 7):
+                return mask_contact(obj)
+            if key == "name" and person:
+                return _first(obj)
+            return text(obj)
+        return obj
+
+    return walk(payload)
 
 
 def _anchor(location: dict | None, building: Building) -> dict:

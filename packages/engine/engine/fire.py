@@ -2,8 +2,10 @@
 
 Each room has one smoke layer under the ceiling (mass + temperature). The burning room
 feeds it through a plume; once a layer drops below a door's top, smoke spills through
-open (or burnt-through) doors. Flashover follows Thomas; after flashover, fire crosses
-open doors after a delay and closed doors when they burn through. Walls never pass fire.
+open (or burnt-through) doors. Where a burning room's smoke spills up into a taller space
+(the atrium), it rises as a spill plume and entrains that space's air (NFPA 92 5.5.2).
+Flashover follows Thomas; after flashover, fire crosses open doors after a delay and
+closed doors when they burn through. Walls never pass fire.
 
 Run: python -m engine.fire --venue engine/data/james_west_sample.json --start f1-main-hall
 """
@@ -28,6 +30,8 @@ from engine.constants import (
     RHO_T,
     SECONDARY_GROWTH,
     SMOKE_PRESENT_DEPTH_M,
+    SPILL_ENTRAINMENT,
+    SPILL_MODES,
     SPREAD_OPEN_DOOR_DELAY_S,
     TENABLE_LAYER_HEIGHT_M,
     TIME_STEP_S,
@@ -101,6 +105,9 @@ class Timeline:
         }
 
 
+_Spill = tuple[Door, str, str, float, float]  # door, source, destination, kg this step, soffit z
+
+
 def _min(*values: float | None) -> float | None:
     present = [v for v in values if v is not None]
     return min(present) if present else None
@@ -117,7 +124,11 @@ class _Sim:
         horizon_s: float,
         frame_step_s: float = 0.0,
         flashover_layer_k: float | None = None,
+        spill_mode: str = SPILL_ENTRAINMENT,
     ):
+        if spill_mode not in SPILL_MODES:
+            raise ValueError(f"unknown spill entrainment {spill_mode!r}; use one of {SPILL_MODES}")
+        self.spill_mode = spill_mode
         self.v = venue
         self.horizon = horizon_s
         self.frame_step = frame_step_s
@@ -236,7 +247,8 @@ class _Sim:
         for door_id, fail in list(self.door_fail_at.items()):
             if fail <= t and door_id not in self.door_failed_s:
                 self.door_failed_s[door_id] = fail
-                self.event(fail, "door_burn_through", door_id, f"{self.name(door_id)} burns through")
+                detail = f"{self.name(door_id)} burns through"
+                self.event(fail, "door_burn_through", door_id, detail)
         for rid, (when, via) in list(self.ignite_at.items()):
             if when <= t and self.state[rid].fire is None:
                 self.ignite(rid, when, SECONDARY_GROWTH, via)
@@ -270,6 +282,7 @@ class _Sim:
 
         # Smoke spills through passable doors, from the deeper layer to the shallower one.
         delta: dict[str, list[float]] = {rid: [0.0, 0.0] for rid in self.v.rooms}  # mass, m*T
+        spills: list[_Spill] = []
         for door in self.v.doors.values():
             if not self.door_passable(door, t):
                 continue
@@ -290,11 +303,16 @@ class _Sim:
             m = min(m, 0.25 * st.mass_kg)
             delta[src][0] -= m
             delta[src][1] -= m * st.temp_k
-            if dst != OUTSIDE:
-                # The doorway jet entrains air and loses heat to the new room's boundaries.
-                t_in = AMBIENT_K + (st.temp_k - AMBIENT_K) * (1 - WALL_LOSS_FRACTION)
-                delta[dst][0] += m
-                delta[dst][1] += m * t_in
+            if dst != OUTSIDE and m > 0:
+                spills.append((door, src, dst, m, top))
+        rising = self.rising_spill_kg(spills)
+        for door, src, dst, m, top in spills:
+            # The doorway jet loses heat to the new room's boundaries; above the soffit it
+            # also entrains that room's clear air (spill plume), which cools it further.
+            excess = (self.state[src].temp_k - AMBIENT_K) * (1 - WALL_LOSS_FRACTION)
+            m_in = m + self.spill_entrained_kg(door, src, dst, m, top, rising.get(src, 0.0), dt)
+            delta[dst][0] += m_in
+            delta[dst][1] += m_in * (AMBIENT_K + excess * m / m_in)
         for rid, (dm, dmt) in delta.items():
             st = self.state[rid]
             if dm > 0:
@@ -318,6 +336,47 @@ class _Sim:
                     else f"hot layer {st.temp_k - 273.15:.0f} °C"
                 )
                 self.event(t, "untenable", rid, f"{room.name} untenable ({why})")
+
+    # --- spill plumes (constants.SPILL_ENTRAINMENT) ---
+    def spill_source_kw(self, src: str) -> float:
+        """Heat release driving a spill plume: only a burning room that hasn't flashed over."""
+        st = self.state[src]
+        if st.fire is None or st.fire.out or st.flashover_s is not None:
+            return 0.0
+        return st.hrr_kw
+
+    def spill_rise_m(self, dst: str, top: float) -> float:
+        """How far a spill plume climbs in `dst` above the soffit before it meets the layer."""
+        return self.interface_z(dst) - top
+
+    def rising_spill_kg(self, spills: list[_Spill]) -> dict[str, float]:
+        """Per burning source room, this step's door flow into spaces where the smoke rises."""
+        total: dict[str, float] = {}
+        for _, src, dst, m, top in spills:
+            if self.spill_source_kw(src) > 0 and self.spill_rise_m(dst, top) > 0:
+                total[src] = total.get(src, 0.0) + m
+        return total
+
+    def spill_entrained_kg(
+        self, door: Door, src: str, dst: str, m: float, top: float, rising: float, dt: float
+    ) -> float:
+        """Clear air a spill plume pulls in between the soffit and the destination's layer.
+
+        The fire plume's flow at soffit height is shared between the doors it leaves by, in
+        proportion to their flow; each door's spill plume gets that share of the fire.
+        """
+        q = self.spill_source_kw(src)
+        rise = self.spill_rise_m(dst, top)
+        if self.spill_mode == "off" or q <= 0 or rise <= 0 or m <= 0:
+            return 0.0
+        edge = top - self.floor_z(self.v.rooms[src])  # soffit above the fire, H
+        q_conv = CONVECTIVE_FRACTION * q
+        plume_at_edge = physics.plume_mass_kg_s(q_conv, edge) * dt
+        share = m / max(rising, plume_at_edge, m)
+        if self.spill_mode == "balcony":
+            m_b = physics.balcony_spill_plume_kg_s(share * q, door.width_m, rise, edge) * dt
+            return max(m_b - m, 0.0)
+        return physics.axisymmetric_spill_entrainment_kg_s(share * q_conv, edge, rise) * dt
 
     def mix(self, rid: str, mass: float, temp_k: float) -> None:
         room, st = self.v.rooms[rid], self.state[rid]
@@ -369,15 +428,18 @@ def simulate(
     horizon_s: float = 900.0,
     frame_step_s: float = 10.0,
     flashover_layer_c: float | None = None,
+    spill_entrainment: str = SPILL_ENTRAINMENT,
 ) -> Timeline:
     """flashover_layer_c (default None: Thomas only): also flash a burning room over once its
-    upper layer reaches this temperature (600 °C is the usual zone-model criterion)."""
+    upper layer reaches this temperature (600 °C is the usual zone-model criterion).
+    spill_entrainment: "balcony" (default, NFPA 92 eq. 5.5.2.1), "axisymmetric" (the lower
+    estimate) or "off"; see constants.SPILL_ENTRAINMENT."""
     if start_room not in venue.rooms:
         raise ValueError(f"unknown start room {start_room!r}; rooms: {sorted(venue.rooms)}")
     if growth not in ALPHA_KW_S2:
         raise ValueError(f"unknown growth {growth!r}; use one of {sorted(ALPHA_KW_S2)}")
     layer_k = None if flashover_layer_c is None else flashover_layer_c + 273.15
-    sim = _Sim(venue, horizon_s, frame_step_s, layer_k)
+    sim = _Sim(venue, horizon_s, frame_step_s, layer_k, spill_entrainment)
     sim.ignite(start_room, 0.0, growth, None)
     sim.run()
 
@@ -459,13 +521,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--start", default="f1-main-hall", help="room id where the fire starts")
     p.add_argument("--growth", default="fast", choices=sorted(ALPHA_KW_S2))
     p.add_argument("--horizon", type=float, default=900.0, help="seconds to simulate")
-    p.add_argument("--frame-step", type=float, default=10.0, help="seconds between frames (0: none)")
+    p.add_argument(
+        "--frame-step", type=float, default=10.0, help="seconds between frames (0: none)"
+    )
     p.add_argument("--events", action="store_true", help="print only the event list as text")
+    p.add_argument(
+        "--spill", default=SPILL_ENTRAINMENT, choices=SPILL_MODES,
+        help="spill-plume entrainment above door soffits (default: %(default)s)",
+    )
     args = p.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to cp1252
     timeline = simulate(
-        load_venue(args.venue), args.start, args.growth, args.horizon, args.frame_step
+        load_venue(args.venue), args.start, args.growth, args.horizon, args.frame_step,
+        spill_entrainment=args.spill,
     )
     if args.events:
         for e in timeline.events:

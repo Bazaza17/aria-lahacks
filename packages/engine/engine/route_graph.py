@@ -2,8 +2,10 @@
 
 Times come from SFPE walking speeds. A route starts at a point inside its space's polygon, then
 walks door to door: through each intermediate space it goes straight from the opening it came in
-by to the opening it leaves by, or via a point inside the space when the straight line would
-leave the polygon (an L-shaped room). Stairs and ramps add their slope length at stair speed.
+by to the opening it leaves by when that line stays inside the polygon, or else along the
+shortest path inside it, turning at the polygon's inner corners (pulled 0.4 m into the room): an
+L-shaped room or a corridor with a bend. Stairs and ramps add their slope length at stair speed,
+and a route's polyline climbs or drops between the stair's two ends (venue.json `ends`).
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from engine.geometry import Point, representative_point, segment_inside
+from engine.geometry import Point, inside, representative_point, segment_inside
 
 if TYPE_CHECKING:
     from engine.aria_venue import _Data
@@ -39,6 +41,13 @@ FS_LEVEL_P_S_M = 1.3  # doors, corridors, ramps (SFPE Fsm 1.3; 0.9 m door -> 0.7
 FS_STAIR_P_S_M = 1.01  # 7/11 stairs (SFPE Fsm for k = 1.08)
 
 Point3 = tuple[float, float, float]
+
+# --- Route geometry (drawing and leg lengths). ---
+CORNER_INSET_M = 0.4  # how far inside the room a path turns at an inner corner (half a shoulder)
+VISIBILITY_STEP_M = 0.2  # sample spacing when testing that a straight walk stays inside a room
+DOOR_MARGIN_M = 0.5  # door points sit on (or, with tracing error, just off) a room's outline
+ANCHOR_NUDGE_M = 0.1  # a door off the outline enters the room this far inside it
+ANCHOR_MARGIN_M = 0.15  # end margin once both ends are inside the room
 
 
 @dataclass(frozen=True)
@@ -72,6 +81,25 @@ class Arc:
     half_m: float = 0.0  # half the slope length
     run_half_m: float = 0.0  # half the horizontal run (the stair is centred on `point`)
     specific_flow: float = FS_LEVEL_P_S_M  # persons/s/m of effective width
+    # Where the opening meets each side ([x, z]): a stair's two ends (venue.json `ends`), else
+    # `point` on both sides.
+    end_frm: Point | None = None
+    end_to: Point | None = None
+    elev_frm: float = 0.0  # floor elevation on each side
+    elev_to: float = 0.0
+
+    def side(self, sid: str) -> Point:
+        """Where this opening meets space `sid` in plan."""
+        end = self.end_frm if sid == self.frm else self.end_to if sid == self.to else None
+        return end or self.point[:2]
+
+    def crossing_points(self) -> list[Point3]:
+        """The polyline across the opening: one point for a level door, or the two ends of a
+        stair, step or ramp at each side's floor elevation."""
+        a, b = self.side(self.frm), self.side(self.to)
+        if abs(self.elev_frm - self.elev_to) < 0.05 and a == b:
+            return [self.point]
+        return [(*a, self.elev_frm), (*b, self.elev_to)]
 
 
 @dataclass(frozen=True)
@@ -80,7 +108,7 @@ class Leg:
 
     t_s: float
     d_m: float
-    bend: Point3 | None  # via this point inside the space, when the straight line leaves it
+    via: tuple[Point3, ...] = ()  # turning points inside the space (none: straight across)
 
 
 @dataclass
@@ -90,21 +118,24 @@ class RouteGraph:
     excluded: dict[str, str] = field(default_factory=dict)  # opening id -> why not walkable
     legs: dict[tuple[str, str, str], Leg] = field(default_factory=dict)  # (space, in, out)
     estimated_positions: dict[str, str] = field(default_factory=dict)  # opening id -> how
+    # From a space's own point to one of its openings: turning points inside the space.
+    starts: dict[tuple[str, str], tuple[Point3, ...]] = field(default_factory=dict)
 
     def arc_count(self) -> int:
         return sum(len(v) for v in self.arcs.values())
 
-    def step(self, prev: Arc | None, arc: Arc) -> tuple[float, float, Point3 | None]:
-        """Time, distance and any bend point from arriving through `prev` (None: from the
-        space's own point, at the start of a route) to crossing `arc`'s opening."""
+    def step(self, prev: Arc | None, arc: Arc) -> tuple[float, float, tuple[Point3, ...]]:
+        """Time, distance and the turning points inside the space from arriving through `prev`
+        (None: from the space's own point, at the start of a route) to crossing `arc`'s
+        opening."""
         if prev is None:
-            return arc.t_in_s, arc.d_in_m, None
+            return arc.t_in_s, arc.d_in_m, self.starts.get((arc.frm, arc.opening), ())
         leg = self.legs.get((arc.frm, prev.opening, arc.opening))
         if leg is None:  # no geometry (a toy graph): via the space's own point
             node = self.nodes[arc.frm]
-            bend = None if node.point is None else (*node.point, node.elevation)
-            return prev.t_out_s + arc.t_in_s, prev.d_out_m + arc.d_in_m, bend
-        return prev.half_s + leg.t_s + arc.half_s, prev.half_m + leg.d_m + arc.half_m, leg.bend
+            via = () if node.point is None else ((*node.point, node.elevation),)
+            return prev.t_out_s + arc.t_in_s, prev.d_out_m + arc.d_in_m, via
+        return prev.half_s + leg.t_s + arc.half_s, prev.half_m + leg.d_m + arc.half_m, leg.via
 
 
 def stair_run(o: dict) -> float:
@@ -143,6 +174,12 @@ def _slope(o: dict) -> tuple[float, float, float, float]:
     return 0.0, 0.0, WALK_LEVEL_M_S, FS_LEVEL_P_S_M
 
 
+def _end(o: dict, sid: str) -> Point | None:
+    """Where a stair meets space `sid` (venue.json `ends`), if given."""
+    p = (o.get("ends") or {}).get(sid)
+    return (float(p[0]), float(p[1])) if p else None
+
+
 def _arc(nodes: dict[str, Node], o: dict, pos: Point, frm: str, to: str) -> Arc:
     run, slope, speed, flow = _slope(o)
     d_in = math.dist(nodes[frm].point, pos) if nodes[frm].point else 0.0
@@ -168,6 +205,10 @@ def _arc(nodes: dict[str, Node], o: dict, pos: Point, frm: str, to: str) -> Arc:
         half_m=slope / 2.0,
         run_half_m=run / 2.0,
         specific_flow=flow,
+        end_frm=_end(o, frm),
+        end_to=_end(o, to),
+        elev_frm=nodes[frm].elevation,
+        elev_to=nodes[to].elevation if to != SAFE else nodes[frm].elevation,
     )
 
 
@@ -194,9 +235,117 @@ def _node(d: _Data, sid: str) -> Node:
     )
 
 
-def _legs(d: _Data, nodes: dict[str, Node], arcs: dict[str, list[Arc]]) -> dict:
-    """Door-to-door walks across every space, for each pair of its walkable openings."""
-    legs = {}
+def _inner_corners(poly: list[Point], inset: float = CORNER_INSET_M) -> list[Point]:
+    """The polygon's reflex (inner) corners, each pulled `inset` into the room: the only
+    places a shortest walk inside the room needs to turn."""
+    n = len(poly)
+    if n < 4:
+        return []
+    ccw = (
+        sum(x0 * z1 - x1 * z0 for (x0, z0), (x1, z1) in zip(poly, poly[1:] + poly[:1], strict=True))
+        > 0
+    )
+    out = []
+    for i, v in enumerate(poly):
+        a, b = poly[i - 1], poly[(i + 1) % n]
+        cross = (v[0] - a[0]) * (b[1] - v[1]) - (v[1] - a[1]) * (b[0] - v[0])
+        if (cross < -1e-9) if ccw else (cross > 1e-9):  # turns away from the inside: reflex
+            ua, ub = _unit(a, v), _unit(b, v)
+            bis = (ua[0] + ub[0], ua[1] + ub[1])
+            norm = math.hypot(*bis) or 1.0
+            for sign in (1.0, -1.0):
+                c = (v[0] + sign * inset * bis[0] / norm, v[1] + sign * inset * bis[1] / norm)
+                if inside(c, poly):
+                    out.append(c)
+                    break
+    return out
+
+
+def _unit(p: Point, q: Point) -> Point:
+    """Unit vector from q towards p."""
+    d = math.dist(p, q) or 1.0
+    return ((p[0] - q[0]) / d, (p[1] - q[1]) / d)
+
+
+def _sees(p: Point, q: Point, poly: list[Point], margin: float = DOOR_MARGIN_M) -> bool:
+    samples = max(16, int(math.dist(p, q) / VISIBILITY_STEP_M))
+    return segment_inside(p, q, poly, samples=samples, end_margin_m=margin)
+
+
+def _anchor(p: Point, poly: list[Point]) -> Point:
+    """p itself if it is inside the polygon, else the nearest point of the outline nudged
+    just inside: where a door traced in the wall gap between two plan outlines enters the
+    room."""
+    if inside(p, poly):
+        return p
+    best, best_d = p, math.inf
+    for (x0, z0), (x1, z1) in zip(poly, poly[1:] + poly[:1], strict=True):
+        dx, dz = x1 - x0, z1 - z0
+        t = max(
+            0.0, min(1.0, ((p[0] - x0) * dx + (p[1] - z0) * dz) / ((dx * dx + dz * dz) or 1e-9))
+        )
+        c = (x0 + t * dx, z0 + t * dz)
+        if math.dist(p, c) < best_d:
+            best, best_d = c, math.dist(p, c)
+    d = best_d or 1.0
+    nudged = (
+        best[0] + ANCHOR_NUDGE_M * (best[0] - p[0]) / d,
+        best[1] + ANCHOR_NUDGE_M * (best[1] - p[1]) / d,
+    )
+    return nudged if inside(nudged, poly) else best
+
+
+def inner_path(p: Point, q: Point, poly: list[Point], fallback: Point | None = None) -> list[Point]:
+    """Turning points of the shortest walk from p to q inside the polygon (a visibility graph
+    over its inner corners, Dijkstra). [] when the straight line stays inside. A door traced
+    more than DOOR_MARGIN_M off the outline (plan tracing error, wall thickness) first steps to
+    the nearest point inside. [fallback] (the room's own point) when no path is found."""
+    if len(poly) < 3 or _sees(p, q, poly):
+        return []
+    pa, qa = _anchor(p, poly), _anchor(q, poly)
+    head = [pa] if math.dist(p, pa) > DOOR_MARGIN_M else []
+    tail = [qa] if math.dist(q, qa) > DOOR_MARGIN_M else []
+    if head or tail:
+        if _sees(pa, qa, poly, ANCHOR_MARGIN_M):
+            return [*head, *tail]
+    pts = [pa, qa, *_inner_corners(poly)]
+    best = {0: 0.0}
+    prev: dict[int, int] = {}
+    todo, done = {0}, set()
+    while todo:
+        i = min(todo, key=best.__getitem__)
+        todo.discard(i)
+        done.add(i)
+        if i == 1:
+            break
+        for j in range(1, len(pts)):
+            if j in done:
+                continue
+            d = best[i] + math.dist(pts[i], pts[j])
+            if d < best.get(j, math.inf) and _sees(pts[i], pts[j], poly, ANCHOR_MARGIN_M):
+                best[j], prev[j] = d, i
+                todo.add(j)
+    if 1 not in prev:
+        return [fallback] if fallback else []
+    chain, k = [], prev[1]
+    while k != 0:
+        chain.append(pts[k])
+        k = prev[k]
+    return [*head, *chain[::-1], *tail]
+
+
+def _length(points: list[Point]) -> float:
+    return sum(math.dist(a, b) for a, b in zip(points, points[1:], strict=False))
+
+
+def _legs(d: _Data, nodes: dict[str, Node], arcs: dict[str, list[Arc]]) -> tuple[dict, dict]:
+    """Door-to-door walks across every space, for each pair of its walkable openings, and the
+    first walk from each space's own point to each of its openings.
+
+    A leg's length is the shortest walk inside the polygon between the two openings' centres,
+    less half of any stair or ramp run on either side (that part is timed on the slope). Its
+    turning points are drawn from where each opening meets this space (a stair's end)."""
+    legs, starts = {}, {}
     touching: dict[str, dict[str, Arc]] = {sid: {} for sid in nodes}
     for out in arcs.values():
         for a in out:  # position and run don't depend on direction
@@ -206,22 +355,27 @@ def _legs(d: _Data, nodes: dict[str, Node], arcs: dict[str, list[Arc]]) -> dict:
         if sid == SAFE:
             continue
         node, poly = nodes[sid], d.polygon(sid)
+        elev = node.elevation
+
+        def lift(points: list[Point], elev: float = elev) -> tuple[Point3, ...]:
+            return tuple((x, z, elev) for x, z in points)
+
+        for a in by_opening.values():
+            if node.point is not None:
+                starts[(sid, a.opening)] = lift(inner_path(node.point, a.side(sid), poly))
         for a_in in by_opening.values():
             for a_out in by_opening.values():
                 if a_in.opening == a_out.opening:
                     continue
                 p, q = a_in.point[:2], a_out.point[:2]
-                bend = None
-                if segment_inside(p, q, poly):
-                    length = math.dist(p, q)
-                else:
-                    bend = (*node.point, node.elevation)
-                    length = math.dist(p, node.point) + math.dist(node.point, q)
+                length = _length([p, *inner_path(p, q, poly, node.point), q])
                 level = max(0.0, length - a_in.run_half_m - a_out.run_half_m)
+                ps, qs = a_in.side(sid), a_out.side(sid)
+                via = lift(inner_path(ps, qs, poly, node.point))
                 legs[(sid, a_in.opening, a_out.opening)] = Leg(
-                    t_s=level / WALK_LEVEL_M_S, d_m=level, bend=bend
+                    t_s=level / WALK_LEVEL_M_S, d_m=level, via=via
                 )
-    return legs
+    return legs, starts
 
 
 def build_route_graph(d: _Data, states: dict[str, dict]) -> RouteGraph:
@@ -245,10 +399,12 @@ def build_route_graph(d: _Data, states: dict[str, dict]) -> RouteGraph:
             if frm == SAFE or (nodes[frm].is_outdoor and not nodes[to].is_outdoor):
                 continue
             arcs[frm].append(_arc(nodes, o, pos, frm, to))
+    legs, starts = _legs(d, nodes, arcs)
     return RouteGraph(
         nodes=nodes,
         arcs=arcs,
         excluded=excluded,
-        legs=_legs(d, nodes, arcs),
+        legs=legs,
         estimated_positions=estimated,
+        starts=starts,
     )

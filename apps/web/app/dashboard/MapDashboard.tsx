@@ -265,9 +265,10 @@ export function MapDashboard({
         {/* The live dispatch console, served by the API through this app's /live proxy. */}
         <a
           href="/live/view"
+          title="Texts, calls and the CREAO agents, live. Anyone can run a drill."
           className="ml-auto flex h-[30px] shrink-0 items-center whitespace-nowrap bg-white px-4 text-[13px] text-ink transition-colors hover:bg-rule-light"
         >
-          Live console ↗
+          Live response ↗
         </a>
       </header>
 

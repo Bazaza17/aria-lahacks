@@ -55,6 +55,27 @@ DOOR_DISCHARGE_COEF = 0.7  # SFPE vent flows (Emmons), sharp-edged opening
 POST_FLASHOVER_K = 1100.0  # ~830 °C, typical fully developed compartment gas temperature
 MAX_LAYER_K = 1300.0
 
+# --- Spill plumes: smoke leaving a burning room under a soffit into a taller space. ---
+# Below the soffit the doorway jet is the door flow alone (SFPE vent flow). Above it the smoke
+# rises as a spill plume through the taller room's clear air and entrains it, so far more
+# (cooler) mass reaches that room's layer: the atrium case of NFPA 92 (2021) 5.5.2 and
+# CIBSE Guide E / BRE 368. Applied only while the source room burns and has not flashed over,
+# and only while the destination's layer is above the soffit. The fire's heat is shared
+# between the openings it spills through in proportion to their flow. Modes:
+# - "balcony" (default): NFPA 92 (2021) eq. 5.5.2.1, m = 0.36 (Q W²)^(1/3) (z_b + 0.25 H),
+#   Q the fire's heat release rate (kW), W the opening width (no balcony: W = opening),
+#   z_b the rise above the soffit, H the soffit above the fire. It treats the opening as a
+#   line source, which suits the James West openings (3.3 m and 9.3 m wide archways). The
+#   standard's design equation, conservative for life safety; an adhered plume (one that
+#   clings to the wall above a door) entrains somewhat less.
+# - "axisymmetric": the fire's own point-source plume (NFPA 92 5.5.1.1) carries on above the
+#   soffit, m_p(Qc, H + z_b) - m_p(Qc, H). Ignores the opening width; the lower estimate.
+# - "off": no entrainment above the soffit (the engine before 18 Oct; under-predicts).
+SPILL_ENTRAINMENT = "balcony"
+SPILL_MODES = ("balcony", "axisymmetric", "off")
+BALCONY_SPILL_COEF = 0.36  # NFPA 92 eq. 5.5.2.1 (kg/s per (kW·m²)^(1/3) per m)
+BALCONY_SPILL_EDGE_FACTOR = 0.25  # NFPA 92 eq. 5.5.2.1: weight on H, soffit height above the fire
+
 # --- Tenability (ISO 13571-style limits, used as simple zone-model criteria). ---
 # Untenable when the smoke layer interface is below 2 m above the occupied floor
 # (visibility and toxic gases at head height), or when the hot layer is hot enough to

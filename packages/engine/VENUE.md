@@ -59,6 +59,7 @@ Today it holds 63 spaces (38 on 1F, 24 on 2F, 1 on 3F) and 99 openings: 14 exits
 | `id` | See the ID rules below |
 | `a`, `b` | Space ids. `b` may be `SAFE`. On an exit, `a` is the side people leave from |
 | `kind` | `door`, `double_door`, `opening`, `gate`, `stair`, `ramp`, `step` or `elevator` |
+| `name` | Exits and stairs: the name people and the viewer use ("Collins Room patio doors"). Shared with the live layer's labels (`apps/api/app/creao/buildings/james_west.json`). Paired doors of one exit share a name, so the viewer shows them as one ("Main entrance (check-in) ×2") |
 | `position` | `[x, z]`: the centre of the opening, or the midpoint of the run for a stair or ramp |
 | `aliases` | Optional, as for spaces ("main entrance", "stairs to 2nd floor") |
 | `ends` | Stairs only, optional: `{space id: [x, z]}`, where the stair meets each space. `ST-100`'s come from room 1's scan, `ST-W`'s from the annunciator (±2 m). Without it both ends use `position` |
@@ -162,6 +163,25 @@ Scanning is done and no tape measurements are planned (`docs/lahacks/01-decision
 - the Founders' opening and the ANN door frame;
 - the Collins Patio and PATIO fence gates;
 - whether the terrace is outdoors. (Which 2F reading the event uses is decided: `2F_indoor`.)
+
+## Exit audit (Sun Oct 18, morning)
+
+Each exit checked against the stitched four-room scan: wall slices every 0.1 m from 0.6 to 2.7 m above the floor, with floor points seen beyond the wall. A doorway reads as wall at header height (about 2.1 m and up) and nothing below it. Glass reads either as a solid surface (reflections) or as nothing at all, so the scan can't place a door leaf inside a glazed wall; there the plan position stands (±1–2 m).
+
+| Exit | Name | Evidence | Verdict |
+|---|---|---|---|
+| `D-110-OUT-1`, `-2` | Main entrance (check-in) | Both inside room 2's open storefront run, x −7.4 to 0.3, with no wall at any height | Kept |
+| `D-galleria_far_end-OUT-1`, `-2` | Galleria back doors (to the porch) | Both on the far end's exterior glass line (z −27.1). Solid surface at x 10.9–15.4 (glass with reflections), nothing at x 15.4–20.5, porch floor seen through both | Kept. Plan positions; leaves can't be told apart in the glass |
+| `D-120-OUT-1` | Founders' Room corner door (by the arcade) | In a 2.4 m gap in 120's wall, x 2.6–5.4 | Kept |
+| `D-120-OUT-2` | Founders' Room patio doors | In the gap at z 9–10.8 of the wall scanned at x 15.3 (0.5 m outside the traced edge) | Kept |
+| `D-140-OUT` | Collins Room patio doors | The x 33.6 wall from z −1.3 to −11.3 has nothing at any height (glass or not captured) | Kept. No scan evidence either way |
+| `D-150-OUT-1` | Collins Room doors to the food area | In a 1.7 m gap of the x 33.6 wall | Kept |
+| `D-150-OUT-2` | Collins Room corner door (far wall) | It sat on 150's corner vertex. The far wall shows a doorway 0.25–1.25 m from the corner: wall above 2.1 m, open below | **Moved** to (22.35, −22.77); clear width 1.0 m (scan, ±0.25) |
+| `D-170-OUT`, `D-192-OUT`, `D-190-OUT`, `D-100-OUT`, `ST-W` | Room 170 doors to the patio, Room 192 door to the patio, Room 190 door to the service yard, Office suite 100 outside door, Outside stairs down from the terrace | Not scanned | Plan only (±1–2 m) |
+
+Interior openings on the main routes (`O-110-140`, `O-galleria_far_end-150`, `D-140-corridor_core`, `O-110-120`, `D-130D-140`) all sit in scanned gaps. The openings traced in the gap between two plan outlines (mostly 2F and the 130 suite, 0.4–0.8 m off each outline) are left where they are: drawn routes step through that gap to the nearest point inside each room.
+
+**Drawn routes** (`viewer.routes`, built in `engine.routes.route_polyline`) start at the space's own point. Inside each space they take the shortest walk that stays inside the outline, turning at its inner corners 0.4 m into the room. They cross a stair from end to end at each side's floor, and stop 2 m past the building exit, heading for the next gate. The walk on across patios to `SAFE` is still timed, but it isn't drawn, because its gates are placeholders.
 
 ## Current unknowns (short form; full list in the file)
 

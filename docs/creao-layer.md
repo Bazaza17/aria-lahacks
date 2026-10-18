@@ -66,7 +66,8 @@ from `GET /engine/starts`), so the fire model and routes come from the engine. I
 
 `GET /live/health` shows the database (TimescaleDB, hypertables, triggers, aggregate), whether the
 TigerData LISTEN is connected, and which CREAO agents are configured. On the laptop with no keys
-set, the endpoints are open; with `SENTRY_ENVIRONMENT=cloud` a missing key rejects every call.
+set, the endpoints are open; with `SENTRY_ENVIRONMENT=cloud` a missing key rejects every
+protected call (the console and drills stay open; see "Open drills" below).
 
 ## For Sai: the messenger bridge
 
@@ -101,7 +102,7 @@ What it does:
   `dispatcher`), `drill` (true unless the evacuation is live), `name` when known and `reason`
   (`alert`, `route_change`, `retext`). `occupant.call_requested` places the ElevenLabs call;
   `handoff.joined` tells the person a dispatcher is taking over.
-- **The building brief:** `GET /live/buildings/{id}/brief` (`X-Tool-Secret` or the dispatcher key)
+- **The building brief:** `GET /live/buildings/{id}/brief` (open; no personal data)
   returns `{building, text, exits: [{id, label, floor}], stairs, assembly, updated_at}`: plain-text
   layout facts for the phone agent (floors and rooms with the event's names, every exterior exit,
   the stairs down, "elevators are not used in an evacuation", where to go once out), built from
@@ -142,7 +143,35 @@ POST /live/intake/events
 
 ## For Thomas: what the dashboard reads
 
-Header `Authorization: Bearer <DISPATCH_API_KEYS entry>` (`?token=` for SSE).
+**Open drills.** The console (`/live/view`, linked as "Live response ↗" from the building page
+and the dashboard) and everything below work without a key: anyone can watch, declare a drill,
+end it, approve routes, re-text, call, assign and take a handoff. The guardrails:
+
+- **Live mode needs the dispatcher key.** Declaring `"mode": "live"`, ending a live evacuation
+  and every action while a live one is running answer 401 without it. The console keeps the key
+  in a small "Dispatcher key" menu (kept in that browser only); with an accepted key it offers
+  Drill / Live fire.
+- **One at a time.** Without a key, a declare is refused (409) while an evacuation is running
+  (one public declare at a time per building, so two at once can't both pass).
+- **Only the venue's own places.** A public declare must name an engine start space, a zone or an
+  exit (422 otherwise), so the alert text only ever carries the venue's label; a hand-typed
+  `fire_model` is ignored, and `description` / `dispatcher` are capped at 200 / 64 characters.
+- **Only during a drill.** Without a key, approve/reject, re-text, call, acknowledge/assign and
+  handoff answer 409 when no drill is running. A public "call" rings each person once per drill
+  (409 after that); person actions are rate limited to 60 a minute per IP.
+- **Drills end themselves** after `DRILL_MAX_MINUTES` (default 20), checked on each read, declare
+  and action. Declares are rate limited to 10 a minute per IP.
+- **Privacy.** Without a dispatcher key or `X-Tool-Secret`, every payload (situation, stream,
+  reports, staff, route proposals, action replies) is masked: phone numbers become `•••• 1234`
+  (fields, and free text with or without a `+`), emails keep only their domain, and people keep
+  only their first name, including a caller who says "my name is ..." (`situation.mask_public`).
+  `situation` carries
+  `"viewer": "dispatcher" | "public"`. With the key or the tool secret, full data as before.
+- **Still protected:** the intake and tool endpoints (`X-Tool-Secret`), `GET /occupants` and
+  `/incidents`, hazards, `PUT /fire-model` (key or secret) and `/mcp` (`MCP_API_KEYS`). With
+  `SENTRY_ENVIRONMENT=cloud`, a missing key still rejects those.
+
+With a key: header `Authorization: Bearer <DISPATCH_API_KEYS entry>` (`?token=` for SSE).
 
 | | |
 |---|---|

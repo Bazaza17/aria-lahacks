@@ -7,8 +7,9 @@ import math
 from engine.constants import (
     ALPHA_KW_S2,
     AMBIENT_K,
+    BALCONY_SPILL_COEF,
+    BALCONY_SPILL_EDGE_FACTOR,
     DOOR_DISCHARGE_COEF,
-    G,
     RHO_T,
     SMOKE_PRESENT_DEPTH_M,
     TENABLE_LAYER_HEIGHT_M,
@@ -16,6 +17,7 @@ from engine.constants import (
     THOMAS_SURFACE_KW_M2,
     THOMAS_VENT_KW,
     VENT_LIMIT_KW,
+    G,
 )
 
 
@@ -56,6 +58,33 @@ def plume_mass_kg_s(q_conv_kw: float, z_m: float) -> float:
     if z <= flame_height:
         return 0.032 * q_conv_kw**0.6 * z
     return 0.071 * q_conv_kw ** (1 / 3) * z ** (5 / 3) + 0.0018 * q_conv_kw
+
+
+def axisymmetric_spill_entrainment_kg_s(q_conv_kw: float, edge_m: float, rise_m: float) -> float:
+    """Air a spill plume entrains rising `rise_m` above a soffit `edge_m` above the fire.
+
+    Treats the plume above the soffit as the fire's NFPA 92 5.5.1.1 axisymmetric plume
+    carrying on: m_p(Qc, H + z_b) - m_p(Qc, H). Ignores the opening width: the lower estimate.
+    """
+    if q_conv_kw <= 0 or rise_m <= 0:
+        return 0.0
+    edge = max(edge_m, 0.1)
+    return max(plume_mass_kg_s(q_conv_kw, edge + rise_m) - plume_mass_kg_s(q_conv_kw, edge), 0.0)
+
+
+def balcony_spill_plume_kg_s(q_kw: float, width_m: float, rise_m: float, edge_m: float) -> float:
+    """Spill plume mass flow z_b = `rise_m` above the spill edge (NFPA 92 2021, eq. 5.5.2.1).
+
+    m = 0.36 (Q W²)^(1/3) (z_b + 0.25 H): Q the fire's heat release rate (kW), W the spill
+    width (m), H the spill edge above the fire (m). Includes the spilled smoke itself.
+    """
+    if q_kw <= 0 or width_m <= 0 or rise_m <= 0:
+        return 0.0
+    return (
+        BALCONY_SPILL_COEF
+        * (q_kw * width_m**2) ** (1 / 3)
+        * (rise_m + BALCONY_SPILL_EDGE_FACTOR * max(edge_m, 0.0))
+    )
 
 
 def door_spill_kg_s(width_m: float, depth_m: float, layer_k: float) -> float:

@@ -367,14 +367,13 @@ def _walk(
     hold: Hold | None = None,
 ) -> Route:
     """Walk the arcs from t0; record the path, polyline, crossing times, margin and cut-off."""
-    node = graph.nodes[source]
-    path, points = [source], [[*node.point, node.elevation]]
+    path = [source]
     t, distance, cut, margin = t0, 0.0, None, INF
     crossings: list[tuple[str, float]] = []
     declared_exit = leaves_building = None  # (arc, crossing time)
     prev = None
     for arc in arcs:
-        dt, dd, bend = graph.step(prev, arc)
+        dt, dd, _ = graph.step(prev, arc)
         t_cross = t + dt if hold is None else hold(arc, t + dt)
         closes = blocks.closes(arc)
         margin = min(margin, closes - t_cross)
@@ -392,9 +391,6 @@ def _walk(
         if leaves_building is None and outward:
             leaves_building = (arc, t_cross)
         path += [arc.opening, arc.to]
-        if bend is not None:
-            points.append(list(bend))
-        points.append(list(arc.point))
         crossings.append((arc.opening, t_cross))
         distance += dd
         t = t_cross
@@ -411,7 +407,7 @@ def _walk(
         status="cut_off" if cut else "ok",
         exit=exit_arc.opening if exit_arc else None,
         path=path,
-        points=points,
+        points=route_polyline(graph, source, arcs, exit_arc),
         distance_m=distance,
         exit_s=None if cut else exit_s,
         eta_s=None if cut else t,
@@ -421,6 +417,63 @@ def _walk(
         arcs=list(arcs),
         crossings=crossings,
     )
+
+
+STEP_OUT_M = 2.0  # a drawn route ends this far past the building exit, into the space beyond
+
+
+def route_polyline(
+    graph: RouteGraph, source: str, arcs: list[Arc], exit_arc: Arc | None = None
+) -> list[list[float]]:
+    """The route as drawn, [x, z, elevation] points: from the space's own point, inside each
+    space along its shortest inside walk (turning at inner corners, not cutting through
+    walls), across each opening (a stair from end to end, at each side's floor), and ending
+    STEP_OUT_M past the building exit. The walk on across patios to the public way (SAFE) is
+    timed but not drawn: its outdoor gates are placeholders."""
+    node = graph.nodes[source]
+    if node.point is None:
+        return []
+    points = [[*node.point, node.elevation]]
+    prev = None
+    for i, arc in enumerate(arcs):
+        _, _, via = graph.step(prev, arc)
+        points += [list(p) for p in via]
+        points += [list(p) for p in arc.crossing_points()]
+        if arc is exit_arc:
+            after = arcs[i + 1] if i + 1 < len(arcs) else None
+            points.append(_step_out(graph, arc, after, points[-2] if len(points) > 1 else None))
+            break
+        prev = arc
+    return _dedupe(points)
+
+
+def _step_out(
+    graph: RouteGraph, arc: Arc, after: Arc | None, before: list[float] | None
+) -> list[float]:
+    """A point STEP_OUT_M beyond the exit, heading where the route goes next (its walk across
+    the space beyond towards the next gate), or straight on when the exit leads to SAFE."""
+    end = arc.side(arc.to)
+    toward = None
+    if after is not None:
+        _, _, via = graph.step(arc, after)
+        toward = via[0][:2] if via else after.side(arc.to)
+    if (toward is None or math.dist(toward, end) < 1e-6) and before is not None:
+        toward = (2 * end[0] - before[0], 2 * end[1] - before[1])  # straight on
+    if toward is None:
+        return [*end, arc.elev_to]
+    d = math.dist(toward, end)
+    if d < 1e-6:
+        return [*end, arc.elev_to]
+    f = min(STEP_OUT_M, d) / d
+    return [end[0] + f * (toward[0] - end[0]), end[1] + f * (toward[1] - end[1]), arc.elev_to]
+
+
+def _dedupe(points: list[list[float]]) -> list[list[float]]:
+    out: list[list[float]] = []
+    for p in points:
+        if not out or math.dist(out[-1], p) > 0.05:
+            out.append(p)
+    return out
 
 
 def _only_through_origin(graph: RouteGraph, blocks: Blocks, source: str, t0: float) -> bool:

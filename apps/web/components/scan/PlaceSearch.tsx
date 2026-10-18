@@ -34,7 +34,7 @@ export function PlaceSearch({ found, onSearch, onClear }: Props) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="caps pointer-events-auto self-start text-[11px] text-quiet transition-colors hover:text-fg"
+        className="caps pointer-events-auto -mx-2 -my-2 self-start px-2 py-2 text-[13px] text-soft transition-colors hover:text-fg"
       >
         ↳ Find a place
       </button>

@@ -90,10 +90,11 @@ def events(av: AriaVenue, tl: Timeline, vt: dict, exits: list[dict]) -> list[dic
                 _event(row["smoke_untenable_s"], "untenable", sid, f"{name} untenable ({why})")
             )
     for e in exits:
+        name = opening_name(av, e["exit"])
         if e["lost_s"] is not None:
-            out.append(_event(e["lost_s"], "exit_blocked", e["exit"], f"exit {e['exit']} lost"))
+            out.append(_event(e["lost_s"], "exit_blocked", e["exit"], f"exit lost: {name}"))
         if e.get("reachable_until_s") is not None:
-            detail = f"no occupied space can reach exit {e['exit']} any more"
+            detail = f"no occupied space can reach {name} any more"
             out.append(_event(e["reachable_until_s"], "exit_unreachable", e["exit"], detail))
     return sorted(out, key=lambda e: (e["t_s"], e["type"]))
 
@@ -205,7 +206,7 @@ def viewer(
         }
     doors = {
         oid: {
-            "name": oid,
+            "name": opening_name(av, oid),
             "position": {"x": o["position"][0], "z": o["position"][1]}
             if o.get("position")
             else None,
@@ -221,10 +222,7 @@ def viewer(
         "horizon_s": tl.horizon_s,
         "rooms": rooms,
         "doors": doors,
-        "exits": [
-            {"id": e["exit"], "label": e["exit"], "door": e["exit"], "blocked_s": e["lost_s"]}
-            for e in exits
-        ],
+        "exits": [_viewer_exit(av, e) for e in exits],
         "events": [{k: e[k] for k in ("t_s", "type", "id", "detail")} for e in events_out],
         "frames": frames_out,
         "scan": {
@@ -232,6 +230,40 @@ def viewer(
             "floor_y": scan_floor_y(av),
         },
     }
+
+
+def opening_name(av: AriaVenue, oid: str) -> str:
+    """venue.json's human `name` for an opening (every exit and stair has one), else its id."""
+    return (av.openings.get(oid) or {}).get("name") or oid
+
+
+def _viewer_exit(av: AriaVenue, e: dict) -> dict:
+    """One building exit for the viewer. blocked_s: the fire takes the opening itself;
+    reachable_until_s: the last departure time (15 s grid) from which any occupied space can
+    still get out through it. At a departure t0 the exit is "lost" once blocked_s <= t0, else
+    "unreachable" once reachable_until_s < t0, else "open" (see exit_state)."""
+    o = av.openings.get(e["exit"]) or {}
+    pos = o.get("position")
+    return {
+        "id": e["exit"],
+        "label": opening_name(av, e["exit"]),
+        "door": e["exit"],
+        "blocked_s": e["lost_s"],
+        "reachable_until_s": e.get("reachable_until_s"),
+        "from": e.get("from"),
+        "to": e.get("to"),
+        "position": {"x": pos[0], "z": pos[1]} if pos else None,
+    }
+
+
+def exit_state(exit_row: dict, t0: float) -> str:
+    """ "lost", "unreachable" or "open" for a departure at t0 (a viewer exits[] row)."""
+    blocked, reach = exit_row.get("blocked_s"), exit_row.get("reachable_until_s")
+    if blocked is not None and blocked <= t0:
+        return "lost"
+    if reach is not None and reach < t0:
+        return "unreachable"
+    return "open"
 
 
 def _route_line(sid: str, occupants: int, kind: str, r: dict) -> dict:
@@ -248,10 +280,15 @@ def _route_line(sid: str, occupants: int, kind: str, r: dict) -> dict:
 
 def viewer_routes(deps: list[dict]) -> dict:
     """Per departure time: Aria's plan for every occupied space, plus the self-chosen
-    (reactive) route wherever it puts people at risk. Points are [x, z, elevation]."""
+    (reactive) route wherever it puts people at risk. Points are [x, z, elevation]: inside
+    each space along its inside walk, across stairs from end to end, ending 2 m past the
+    building exit. `exit_use`: per exit, how many people the plan and the self-chosen routes
+    send through it (only exits someone uses); every plan route at t0 avoids an exit already
+    lost then."""
     out = []
     for dep in deps:
         lines = []
+        use: dict[str, dict[str, int]] = {}
         for sid, sp in dep["spaces"].items():
             occupants = sp.get("occupants", 0)
             if not occupants:
@@ -262,6 +299,10 @@ def viewer_routes(deps: list[dict]) -> dict:
             fails = reactive.get("at_risk") or reactive.get("status") != "ok"
             if reactive.get("points") and fails:
                 lines.append(_route_line(sid, occupants, "reactive", reactive))
+            for mode, r in (("plan", plan), ("reactive", reactive)):
+                if r.get("exit") and r.get("status") != "trapped":
+                    row = use.setdefault(r["exit"], {"plan": 0, "reactive": 0})
+                    row[mode] += occupants
         out.append(
             {
                 "t0_s": dep["t0_s"],
@@ -270,6 +311,7 @@ def viewer_routes(deps: list[dict]) -> dict:
                     "reactive": dep["occupants_at_risk"].get("reactive", 0),
                 },
                 "routes": lines,
+                "exit_use": dict(sorted(use.items())),
             }
         )
     return {"departures": out}

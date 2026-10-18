@@ -31,6 +31,8 @@ class Settings:
     # Human handoff: "join call" transfers the caller here when set
     dispatcher_phone: str | None = None
     cloud: bool = False  # SENTRY_ENVIRONMENT=cloud: a missing key is an error, never "open"
+    # Open drills: anyone may declare one, so a drill ends itself after this long
+    drill_max_minutes: float = 20.0
 
 
 @lru_cache
@@ -66,4 +68,5 @@ def get_settings() -> Settings:
         creao_debounce_secs=float(env("CREAO_DEBOUNCE_SECS") or Settings.creao_debounce_secs),
         dispatcher_phone=env("DISPATCHER_PHONE") or None,
         cloud=env("SENTRY_ENVIRONMENT", "laptop") == "cloud",
+        drill_max_minutes=float(env("DRILL_MAX_MINUTES") or Settings.drill_max_minutes),
     )

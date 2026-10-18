@@ -6,24 +6,29 @@ Intake (Sai's Photon + ElevenLabs pipeline, X-Tool-Secret):
   POST /live/tools/update-evacuee          ElevenLabs server tool
   POST /live/buildings/{id}/occupants      who is in the building
 
-Live view (dispatcher dashboard + CREAO, Bearer dispatcher key):
+Live view (open: no key needed; without a dispatcher key or X-Tool-Secret, phone numbers are
+masked and people keep only their first name, see situation.mask_public):
+  GET  /live/view                          the console
   GET  /live/buildings/{id}/situation      pins, exits, flows, roll call, hazards, routes
   GET  /live/buildings/{id}/flow           people out per exit per 15 s (TigerData continuous aggregate)
-  GET  /live/stream?building_id=&token=    Server-Sent Events, streamed out of TigerData (dispatcher key or X-Tool-Secret)
+  GET  /live/stream?building_id=&token=    Server-Sent Events, streamed out of TigerData
   GET  /live/buildings/{id}/report[.md]    the live incident report the CREAO staff writes
   GET  /live/buildings/{id}/staff          the CREAO command staff: org chart, handoffs, activity
 
 CREAO callback:
   POST /live/creao/run-result?push=<run_id>&token=   CREAO calls this when an agent run finishes
 
-Dispatcher management (Bearer dispatcher key):
-  POST /live/buildings/{id}/evacuations    declare a fire or labeled drill; an "origin" runs the engine
-  POST /live/evacuations/{id}/end
-  PUT  /live/buildings/{id}/fire-model     {"engine": {"start", "growth"}} or hand-typed steps
+Open drills (no key for a drill; a live evacuation needs the dispatcher key):
+  POST /live/buildings/{id}/evacuations    declare a drill (mode "live": key only); an "origin" runs
+                                           the engine. Without a key it's refused while one is active.
+  POST /live/evacuations/{id}/end          drills also end themselves after DRILL_MAX_MINUTES (20)
   GET  /live/buildings/{id}/route-proposals, POST /live/route-proposals/{id}/decision
-  POST /live/buildings/{id}/hazards, /live/hazards/{id}/verify, /live/hazards/{id}/clear
   POST /live/incidents/{id}/acknowledge, /assign, /handoff/join, /handoff/resolve
   POST /live/occupants/{id}/retext, /call  re-send someone their approved route, or call them now
+
+Dispatcher management (Bearer dispatcher key or X-Tool-Secret):
+  PUT  /live/buildings/{id}/fire-model     {"engine": {"start", "growth"}} or hand-typed steps
+  POST /live/buildings/{id}/hazards, /live/hazards/{id}/verify, /live/hazards/{id}/clear
 
 Phone agent / messenger (Bearer dispatcher key or X-Tool-Secret):
   GET  /live/buildings/{id}/brief          plain-text layout facts from the venue model
@@ -51,6 +56,7 @@ from app.creao import (
     comms,
     db,
     dispatch,
+    engine_model,
     hub,
     intake,
     plan,
@@ -59,7 +65,7 @@ from app.creao import (
     situation,
 )
 from app.creao import location as loc
-from app.creao.auth import require_dispatcher, require_dispatcher_or_tool, require_tool
+from app.creao.auth import require_dispatcher, require_dispatcher_or_tool, require_tool, viewer
 from app.creao.buildings import (
     Building,
     all_buildings,
@@ -84,6 +90,57 @@ from app.ratelimit import limiter
 
 router = APIRouter(prefix="/live", tags=["live"])
 Session = Annotated[AsyncSession, Depends(get_session)]
+# True with a dispatcher key or X-Tool-Secret (full data); False for the public (open drills)
+Privileged = Annotated[bool, Depends(viewer)]
+
+
+async def _names(session: AsyncSession, building_id: str) -> list[str]:
+    rows = await session.execute(
+        select(Occupant.name).where(Occupant.building_id == building_id, Occupant.name.is_not(None))
+    )
+    return [n for (n,) in rows.all()]
+
+
+async def _out(session: AsyncSession, privileged: bool, building_id: str, payload: Any) -> Any:
+    """The payload as is for a dispatcher or the messenger; masked for the public."""
+    if privileged:
+        return payload
+    return situation.mask_public(payload, await _names(session, building_id))
+
+
+async def _expire_drill(session: AsyncSession, building_id: str) -> None:
+    """Anyone can declare a drill, so a drill ends itself after DRILL_MAX_MINUTES."""
+    ev = await plan.active_evacuation(session, building_id)
+    if ev and ev.mode == "drill" and plan.minute_now(ev) > get_settings().drill_max_minutes:
+        await dispatch.end(session, ev)
+
+
+async def _drill_only(session: AsyncSession, privileged: bool, building_id: str) -> None:
+    """Without a key, actions only touch a running drill: with no evacuation there is nothing to
+    act on, and a live evacuation needs the dispatcher key."""
+    if privileged:
+        return
+    await _expire_drill(session, building_id)
+    ev = await plan.active_evacuation(session, building_id)
+    if ev is None:
+        raise HTTPException(409, "No drill is running here")
+    if ev.mode != "drill":
+        raise HTTPException(401, "Dispatcher key required during a live evacuation")
+
+
+def _known_origin(building: Building, origin: str | None) -> bool:
+    """A public declare must name one of the venue's own places (an engine start space, a zone or
+    an exit), so the alert text only ever carries the venue's label, never typed text."""
+    if not origin or not origin.strip():
+        return False
+    if loc.match_place(building, origin) is not None:
+        return True
+    return engine_model.resolve_start(building, origin, engine_model.start_spaces()) is not None
+
+
+# One public declare at a time per building (two at once could both pass the "already running"
+# check, and dispatch.start would end the first and alert everyone twice).
+_declare_locks: dict[str, asyncio.Lock] = {}
 
 
 def _building(building_id: str | None = None, line: str | None = None) -> Building:
@@ -449,22 +506,28 @@ async def incidents(building_id: str, session: Session) -> list[dict]:
 # ---------------------------------------------------------------- live view
 
 
-@router.get(
-    "/buildings/{building_id}/situation", dependencies=[Depends(require_dispatcher_or_tool)]
-)
-async def get_situation(building_id: str, session: Session) -> dict:
-    return await situation.build(session, _building(building_id))
+@router.get("/buildings/{building_id}/situation")
+async def get_situation(building_id: str, session: Session, privileged: Privileged) -> dict:
+    building = _building(building_id)
+    await _expire_drill(session, building.id)
+    out = await _out(session, privileged, building.id, await situation.build(session, building))
+    return {**out, "viewer": "dispatcher" if privileged else "public"}
 
 
-@router.get("/buildings/{building_id}/flow", dependencies=[Depends(require_dispatcher_or_tool)])
+@router.get("/buildings/{building_id}/flow")
 async def get_flow(building_id: str, session: Session, minutes: int = 10) -> dict:
     return await situation.flow(session, _building(building_id), max(1, min(minutes, 120)))
 
 
-@router.get("/stream", dependencies=[Depends(require_dispatcher_or_tool)])
+@router.get("/stream")
 @limiter.exempt
-async def stream(request: Request, building_id: str | None = None) -> StreamingResponse:
-    """Every live change for a building as Server-Sent Events (event: <type>, data: JSON)."""
+async def stream(
+    request: Request, session: Session, privileged: Privileged, building_id: str | None = None
+) -> StreamingResponse:
+    """Every live change for a building as Server-Sent Events (event: <type>, data: JSON).
+    Masked for the public (no key): phone numbers hidden, first names only."""
+    names = await _names(session, building_id) if building_id and not privileged else []
+    await session.close()  # never hold a database connection for the life of the stream
 
     async def events():
         async with hub.subscribe() as queue:
@@ -477,6 +540,8 @@ async def stream(request: Request, building_id: str | None = None) -> StreamingR
                     continue
                 if building_id and msg.get("building_id") not in (building_id, None):
                     continue
+                if not privileged:
+                    msg = situation.mask_public(msg, names)
                 yield f"event: {msg['type']}\ndata: {json.dumps(msg, default=str)}\n\n"
 
     return StreamingResponse(
@@ -500,30 +565,57 @@ class EvacuationIn(BaseModel):
     growth: Literal["slow", "medium", "fast", "ultrafast"] | None = Field(
         None, description="Fire growth for the engine (default fast)"
     )
-    description: str | None = None
-    dispatcher: str | None = None
-    fire_model: dict | None = Field(None, description="A hand-typed step model instead")
+    description: str | None = Field(None, max_length=200)
+    dispatcher: str | None = Field(None, max_length=64)
+    fire_model: dict | None = Field(
+        None, description="A hand-typed step model instead (dispatcher key only)"
+    )
 
 
-@router.post("/buildings/{building_id}/evacuations", dependencies=[Depends(require_dispatcher)])
-async def start_evacuation(building_id: str, body: EvacuationIn, session: Session) -> dict:
+@router.post("/buildings/{building_id}/evacuations")
+@limiter.limit("10/minute")
+async def start_evacuation(
+    request: Request, building_id: str, body: EvacuationIn, session: Session, privileged: Privileged
+) -> dict:
+    """Open drills: anyone may declare a drill at one of the venue's places when none is running;
+    "live" and a hand-typed fire model need the key."""
+    building = _building(building_id)
+    if privileged:
+        return await _declare(session, building, body, body.fire_model)
+    if body.mode == "live":
+        raise HTTPException(401, "Dispatcher key required to declare a live evacuation")
+    if not _known_origin(building, body.origin):
+        raise HTTPException(422, "Pick where the fire starts from the venue's places")
+    async with _declare_locks.setdefault(building.id, asyncio.Lock()):
+        await _expire_drill(session, building.id)
+        if await plan.active_evacuation(session, building.id):
+            raise HTTPException(409, "An evacuation is already running here; end it first")
+        out = await _declare(session, building, body, None)
+    return await _out(session, privileged, building.id, out)
+
+
+async def _declare(
+    session: AsyncSession, building: Building, body: EvacuationIn, fire_model: dict | None
+) -> dict:
     return await dispatch.start(
         session,
-        _building(building_id),
+        building,
         mode=body.mode,
         origin=body.origin,
         description=body.description,
-        dispatcher=body.dispatcher,
-        fire_model=body.fire_model,
+        dispatcher=body.dispatcher or None,
+        fire_model=fire_model,
         growth=body.growth,
     )
 
 
-@router.post("/evacuations/{evacuation_id}/end", dependencies=[Depends(require_dispatcher)])
-async def end_evacuation(evacuation_id: str, session: Session) -> dict:
+@router.post("/evacuations/{evacuation_id}/end")
+async def end_evacuation(evacuation_id: str, session: Session, privileged: Privileged) -> dict:
     ev = await session.get(Evacuation, evacuation_id)
     if ev is None:
         raise HTTPException(404, "Unknown evacuation")
+    if ev.mode == "live" and not privileged:
+        raise HTTPException(401, "Dispatcher key required to end a live evacuation")
     await dispatch.end(session, ev)
     return {"ended": True}
 
@@ -540,10 +632,8 @@ async def put_fire_model(building_id: str, body: dict[str, Any], session: Sessio
         raise HTTPException(422, str(e)) from e
 
 
-@router.get(
-    "/buildings/{building_id}/route-proposals", dependencies=[Depends(require_dispatcher_or_tool)]
-)
-async def route_proposals(building_id: str, session: Session) -> list[dict]:
+@router.get("/buildings/{building_id}/route-proposals")
+async def route_proposals(building_id: str, session: Session, privileged: Privileged) -> list[dict]:
     building = _building(building_id)
     ev = await plan.active_evacuation(session, building.id)
     if ev is None:
@@ -556,7 +646,9 @@ async def route_proposals(building_id: str, session: Session) -> list[dict]:
             )
         )
     ).scalars()
-    return [plan.proposal_out(p, building) for p in rows]
+    return await _out(
+        session, privileged, building.id, [plan.proposal_out(p, building) for p in rows]
+    )
 
 
 class Decision(BaseModel):
@@ -564,14 +656,17 @@ class Decision(BaseModel):
     dispatcher: str = Field(min_length=1, max_length=64)
 
 
-@router.post("/route-proposals/{proposal_id}/decision", dependencies=[Depends(require_dispatcher)])
-async def decide(proposal_id: str, body: Decision, session: Session) -> dict:
+@router.post("/route-proposals/{proposal_id}/decision")
+async def decide(
+    proposal_id: str, body: Decision, session: Session, privileged: Privileged
+) -> dict:
     proposal = await session.get(RouteProposal, proposal_id)
     if proposal is None:
         raise HTTPException(404, "Unknown proposal")
     building = _building(proposal.building_id)
+    await _drill_only(session, privileged, building.id)
     try:
-        return await plan.decide(
+        out = await plan.decide(
             session, building, proposal, body.decision == "approve", body.dispatcher
         )
     except plan.StaleProposal as e:
@@ -587,6 +682,7 @@ async def decide(proposal_id: str, body: Decision, session: Session) -> dict:
         ) from e
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
+    return await _out(session, privileged, building.id, out)
 
 
 class HazardIn(BaseModel):
@@ -657,14 +753,16 @@ async def _incident(session: AsyncSession, incident_id: str) -> Incident:
     return inc
 
 
-@router.post("/incidents/{incident_id}/{action}", dependencies=[Depends(require_dispatcher)])
+@router.post("/incidents/{incident_id}/{action}")
 async def incident_action(
     incident_id: str,
     action: Literal["acknowledge", "assign"],
     body: IncidentAction,
     session: Session,
+    privileged: Privileged,
 ) -> dict:
     inc = await _incident(session, incident_id)
+    await _drill_only(session, privileged, inc.building_id)
     if action == "acknowledge":
         inc.acknowledged_by = body.dispatcher
         note = f"Acknowledged by {body.dispatcher}"
@@ -680,26 +778,37 @@ async def incident_action(
         incident_id=inc.id,
         data=intake.incident_out(inc),
     )
-    return intake.incident_out(inc)
+    return await _out(session, privileged, inc.building_id, intake.incident_out(inc))
 
 
-@router.post(
-    "/incidents/{incident_id}/handoff/{action}", dependencies=[Depends(require_dispatcher)]
-)
+@router.post("/incidents/{incident_id}/handoff/{action}")
 async def handoff_action(
-    incident_id: str, action: Literal["join", "resolve"], body: IncidentAction, session: Session
+    incident_id: str,
+    action: Literal["join", "resolve"],
+    body: IncidentAction,
+    session: Session,
+    privileged: Privileged,
 ) -> dict:
     inc = await _incident(session, incident_id)
+    await _drill_only(session, privileged, inc.building_id)
     if action == "join":
-        return await dispatch.join_handoff(
+        out = await dispatch.join_handoff(
             session, inc, body.dispatcher, get_settings().dispatcher_phone
         )
-    return await dispatch.resolve_handoff(session, inc, body.dispatcher)
+    else:
+        out = await dispatch.resolve_handoff(session, inc, body.dispatcher)
+    return await _out(session, privileged, inc.building_id, out)
 
 
-@router.post("/occupants/{occupant_id}/{action}", dependencies=[Depends(require_dispatcher)])
+@router.post("/occupants/{occupant_id}/{action}")
+@limiter.limit("60/minute")
 async def occupant_action(
-    occupant_id: str, action: Literal["retext", "call"], body: IncidentAction, session: Session
+    request: Request,
+    occupant_id: str,
+    action: Literal["retext", "call"],
+    body: IncidentAction,
+    session: Session,
+    privileged: Privileged,
 ) -> dict:
     """From the dispatcher's queue: re-text someone the route they're approved for (e.g. they said
     they're heading to an unsafe exit), or have the messenger call them now."""
@@ -707,6 +816,7 @@ async def occupant_action(
     if occ is None:
         raise HTTPException(404, "Unknown person")
     building = _building(occ.building_id)
+    await _drill_only(session, privileged, building.id)
     if action == "retext":
         reply = await dispatch.reply_for(session, building, occ)
         message = reply["instruction"]["message"]
@@ -729,7 +839,10 @@ async def occupant_action(
             by="dispatcher",
             dispatcher=body.dispatcher,
         )
-        return {"ok": True, "message": message}
+        return await _out(session, privileged, building.id, {"ok": True, "message": message})
+    if not privileged and occ.call_requested_at is not None:
+        # one call per person per drill from the public console (each one rings a real phone)
+        raise HTTPException(409, "A call to this person is already requested in this drill")
     occ.call_requested_at = utcnow()
     await session.commit()
     await hub.publish(
@@ -749,18 +862,17 @@ async def occupant_action(
 # ---------------------------------------------------------------- live incident report
 
 
-@router.get("/buildings/{building_id}/report", dependencies=[Depends(require_dispatcher_or_tool)])
-async def get_report(building_id: str, session: Session) -> dict:
-    return await report.build(session, _building(building_id))
+@router.get("/buildings/{building_id}/report")
+async def get_report(building_id: str, session: Session, privileged: Privileged) -> dict:
+    building = _building(building_id)
+    return await _out(session, privileged, building.id, await report.build(session, building))
 
 
-@router.get(
-    "/buildings/{building_id}/report.md",
-    dependencies=[Depends(require_dispatcher_or_tool)],
-    response_class=PlainTextResponse,
-)
-async def get_report_md(building_id: str, session: Session) -> str:
-    return report.markdown(await report.build(session, _building(building_id)))
+@router.get("/buildings/{building_id}/report.md", response_class=PlainTextResponse)
+async def get_report_md(building_id: str, session: Session, privileged: Privileged) -> str:
+    building = _building(building_id)
+    data = await _out(session, privileged, building.id, await report.build(session, building))
+    return report.markdown(data)
 
 
 # ---------------------------------------------------------------- CREAO command staff
@@ -817,9 +929,11 @@ async def creao_run_result(
     return {"received": True}
 
 
-@router.get("/buildings/{building_id}/staff", dependencies=[Depends(require_dispatcher_or_tool)])
-async def staff(building_id: str, session: Session) -> dict:
-    return await agents.staff_overview(session, _building(building_id).id, set(bridge.deployed()))
+@router.get("/buildings/{building_id}/staff")
+async def staff(building_id: str, session: Session, privileged: Privileged) -> dict:
+    building = _building(building_id)
+    overview = await agents.staff_overview(session, building.id, set(bridge.deployed()))
+    return await _out(session, privileged, building.id, overview)
 
 
 # ---------------------------------------------------------------- live view (demo / testing)
@@ -830,11 +944,12 @@ _VIEW = Path(__file__).resolve().parent.parent / "creao" / "view.html"
 @router.get("/view", response_class=HTMLResponse, include_in_schema=False)
 @limiter.exempt
 async def view() -> HTMLResponse:
-    """A live map of the layer (pins, exits, roll call, approvals, CREAO staff). Asks for a dispatcher key."""
+    """A live map of the layer (pins, exits, roll call, approvals, CREAO staff). Open: no key needed
+    to watch or run a drill; a dispatcher key (in its menu) unlocks live mode and full names."""
     return HTMLResponse(_VIEW.read_text(encoding="utf-8"), headers={"Cache-Control": "no-cache"})
 
 
-@router.get("/buildings", dependencies=[Depends(require_dispatcher_or_tool)])
+@router.get("/buildings")
 async def buildings_list() -> list[dict]:
     default = default_building()
     return [
@@ -843,12 +958,12 @@ async def buildings_list() -> list[dict]:
     ]
 
 
-@router.get("/buildings/{building_id}", dependencies=[Depends(require_dispatcher_or_tool)])
+@router.get("/buildings/{building_id}")
 async def building_profile(building_id: str) -> dict:
     return _building(building_id).model_dump(mode="json")
 
 
-@router.get("/buildings/{building_id}/brief", dependencies=[Depends(require_dispatcher_or_tool)])
+@router.get("/buildings/{building_id}/brief")
 async def building_brief(building_id: str) -> dict:
     """Plain-text layout facts for the phone agent (floors, rooms, every exit, the stairs), from
     the profile generated from the engine's venue model."""
@@ -858,9 +973,10 @@ async def building_brief(building_id: str) -> dict:
 SCANS = Path(__file__).resolve().parents[3] / "web" / "public" / "scans"
 
 
-@router.get("/scans/{name:path}", dependencies=[Depends(require_dispatcher)])
+@router.get("/scans/{name:path}")
 async def get_scan(name: str) -> FileResponse:
-    """A scan in apps/web/public/scans (gitignored; it can show attendees), for the 3D map."""
+    """A scan in apps/web/public/scans (gitignored), for the console's 3D map. Open like the
+    console; the web app already shows the same scan publicly."""
     path = (SCANS / name).resolve()
     if (
         not re.fullmatch(r"[\w-]+(/[\w-]+)*\.glb", name)
@@ -871,8 +987,9 @@ async def get_scan(name: str) -> FileResponse:
     return FileResponse(path, media_type="model/gltf-binary")
 
 
-@router.get("/incidents/{incident_id}/report", dependencies=[Depends(require_dispatcher_or_tool)])
-async def get_incident_report(incident_id: str, session: Session) -> dict:
+@router.get("/incidents/{incident_id}/report")
+async def get_incident_report(incident_id: str, session: Session, privileged: Privileged) -> dict:
     """What opens when the dispatcher clicks a pin: the incident with its CREAO report and timeline."""
     inc = await _incident(session, incident_id)
-    return await report.incident_report(session, _building(inc.building_id), inc)
+    out = await report.incident_report(session, _building(inc.building_id), inc)
+    return await _out(session, privileged, inc.building_id, out)
