@@ -460,7 +460,8 @@ function ScanMetadata({
   verified: boolean;
 }) {
   return (
-    <div className="pointer-events-none absolute bottom-4 left-8 flex gap-8 [text-shadow:0_0_16px_var(--color-scan),0_0_6px_var(--color-scan),0_0_2px_var(--color-scan)]">
+    // right-[200px] keeps the captions clear of the route key; on narrower screens they wrap upward.
+    <div className="pointer-events-none absolute bottom-4 left-8 right-[200px] flex flex-wrap gap-x-8 gap-y-3 [text-shadow:0_0_16px_var(--color-scan),0_0_6px_var(--color-scan),0_0_2px_var(--color-scan)]">
       <Caption label="Scan" value="Phone LiDAR · 4 rooms of 1F" />
       <Caption label="Stitch" value="±0.3 m at the joins" />
       <Caption label="Mesh" value={formatVertices(vertexCount)} />
