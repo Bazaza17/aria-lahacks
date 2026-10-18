@@ -41,7 +41,7 @@ uv run python scripts/creao_standin.py --print-env >> .env   # rehearse the CREA
 uv run uvicorn app.main:app --port 8000 --timeout-graceful-shutdown 5   # open SSE streams otherwise block shutdown
 uv run python scripts/creao_standin.py                      # second terminal: scripted CREAO agents (no AI)
 uv run python scripts/live_feed.py --approve                # third terminal: a drill, as Sai's pipeline sends it
-curl -N "http://localhost:8000/live/stream?building_id=e5a3fddc-e22c-431c-a5d3-ee29ef8604d1"
+curl -N "http://localhost:8000/live/stream?building_id=547b5ec5-30c5-4f76-8080-012a52e90bd9"
 ```
 
 `GET /live/health` shows the database (TimescaleDB, hypertables, triggers, aggregate), whether the

@@ -2,8 +2,8 @@
 
 One JSON file per building here. Anchors are normalized (nx, ny, nz in 0..1 of the scan mesh's
 bounding box), the same space as apps/web/lib/scan-coords.ts, so pins line up with the 3D viewer.
-the_dock.json copies its ids and anchors from apps/web/lib/scan-evac-paths.ts. The venue gets its
-own file once its scan and exits are calibrated.
+james_west.json is the venue (James West Alumni Center), the only building: The Dock, the Miami
+demo, was removed, and a default building id that names no profile here falls back to the first one.
 
 People and incidents are only ever placed at these named zones and exits (or GPS). Nothing is
 invented: anything else falls back to the floor or building, marked approximate.
@@ -106,7 +106,8 @@ def get_building(building_id: str | None) -> Building | None:
 def default_building() -> Building | None:
     buildings = all_buildings()
     preferred = get_settings().default_building_id
-    return buildings.get(preferred) if preferred else next(iter(buildings.values()), None)
+    # an id from an old .env (e.g. The Dock's) must not leave the console on a blank building
+    return buildings.get(preferred or "") or next(iter(buildings.values()), None)
 
 
 def _digits(number: str) -> str:
