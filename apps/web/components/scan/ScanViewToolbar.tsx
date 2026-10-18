@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import type { ScanViewMode } from "@/components/scan/BuildingScan";
 import { hasEvacPlan } from "@/lib/scan-evac-paths";
 
@@ -15,12 +17,15 @@ export function ScanViewToolbar({
   buildingId,
   evacOpenCount,
   evacTotal,
+  children,
 }: {
   mode: ScanViewMode;
   onModeChange: (m: ScanViewMode) => void;
   buildingId: string;
   evacOpenCount: number;
   evacTotal: number;
+  /** Extra controls stacked under the mode buttons. */
+  children?: ReactNode;
 }) {
   const hasEvac = hasEvacPlan(buildingId);
 
@@ -63,6 +68,8 @@ export function ScanViewToolbar({
           </span>
         </div>
       )}
+
+      {children}
     </div>
   );
 }

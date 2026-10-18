@@ -417,3 +417,57 @@ Times are seconds after ignition.
   out is through 140. The adapter reads whatever is there. The tests check invariants (every
   opening mapped or excluded with a reason, merged rooms, door rules, the fire rules, `SAFE`
   reachable when nothing burns, queues on a toy graph), not exact counts.
+
+## Place lookup (`engine.places`)
+
+Words to a point on the venue: "stairs first floor", "Collins Room", "fire alarm panel". Stdlib
+only. It reads `venue.json` (spaces, openings, their `aliases`, stair `ends`, space `pin`s and
+`landmarks`; see VENUE.md) and the words and weights in `engine/data/places_vocab.json`.
+
+```bash
+uv run python -m engine.places "stairs first floor" "main entrance"   # readable results
+uv run python -m engine.places --json "Collins Room"                  # one JSON result per query
+uv run python -m engine.places --at 14.3,0.62,-20.2                   # space under x,elevation,z
+uv run python -m engine.places --index --out ../../apps/web/public/fire/places.json
+```
+
+Regenerate `places.json` whenever `venue.json` changes, next to the viewer's `fire/venue.json`.
+
+**Search rules.**
+- An id, alias or event name said in full wins outright, before floor words are read
+  ("stairs to 2nd floor" is `ST-W`, not "stairs" on the 2F).
+- Floor words ("first floor", "upstairs") filter by storey. A floor word on its own means that
+  floor's stairs.
+- Compass words are never resolved (VENUE.md, north): "west exit" searches as "exit", and the
+  result's `note` says so.
+- Otherwise places score on shared words, a fuzzy match (typos) and the kind of thing asked for
+  ("stairs", "exit", "restroom"). Every place within `tie_margin` of the best is a match; when
+  the matches are more than one feature, the result is `ambiguous`.
+- `tests/places_queries.json` holds the shared cases any port of the search must pass.
+
+**A search result:** `{query, storey, ambiguous, matches: [place + score], also: [up to 5
+runners-up], note}`. `space_at(raw, x, z, elevation)` is the reverse: the space under a point.
+
+**`places.json`** (`schema_version: aria-places/1`), one compact line:
+
+| Key | Holds |
+|---|---|
+| `venue`, `frame` | The building name; `frame.floor_y` is the scan Y of elevation 0 (-3.91), so a point's scan Y is `floor_y + elevation` |
+| `vocab` | `filler`, `compass`, `storeys`, `intents`, `kind_words` and `weights`: everything a port of `search` needs besides the algorithm |
+| `places[]` | One per space, walkable opening (no `V-` voids, no elevator shaft), stair end and landmark |
+
+Each place:
+
+| Field | Meaning |
+|---|---|
+| `id` | `space:<id>`, `opening:<id>`, `stair:<stair id>:<space id>` or `landmark:<id>` |
+| `ref` | The venue.json id of the feature. Two ends of one stair share it |
+| `type` | Search category: `space`, `restroom`, `elevator`, `outdoor`, `exit`, `door`, `gate`, `opening`, `step`, `ramp`, `stair` or `landmark` |
+| `kind`, `label`, `storey` | venue.json `kind`; a display name; `1F`, `2F` or `3F` |
+| `point` | `[x, elevation, z]` in the venue frame, metres. A space's `pin` if set, else a point inside it; an opening's `position` (steps and ramps at mid-rise); a stair end's `ends` entry |
+| `space` | The space it is in (an opening's `a` side) |
+| `scanned` | On the ground-floor scan (its space is in `scanned_by`). False: draw it as plan-only |
+| `approx_m` | How far off the point may be: 0.3 scan, 0.5 scanned stair end, 1.5 traced plan or unmeasured door, 2.0 annunciator, 2.5 plan box or a stair end with no `ends` |
+| `polygon` | Spaces only: the outline, `[[x, z], …]` |
+| `note` | Landmarks only: where the position comes from |
+| `exact`, `names`, `terms` | What search compares against, already normalized (lower case, filler dropped, plural `s` stripped) |

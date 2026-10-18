@@ -263,3 +263,26 @@ body {
     transform: translate(-50%, -100%) scale(1);
   }
 }
+
+/* 3D scan "find a place" pins (the renderer positions them; their bottom sits on the beam) */
+.scan-place-pin {
+  pointer-events: none;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 3px 7px;
+  border-radius: 3px;
+  border: 1px solid rgba(232, 121, 249, 0.6);
+  background: rgba(0, 0, 0, 0.88);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: rgba(250, 232, 255, 0.95);
+  white-space: nowrap;
+  backdrop-filter: blur(6px);
+}
+
+.scan-place-pin[data-on-scan="false"] {
+  border-style: dashed;
+  color: rgba(250, 232, 255, 0.7);
+}

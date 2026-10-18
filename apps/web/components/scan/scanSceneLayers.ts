@@ -6,6 +6,7 @@ import type { ResolvedExit, ResolvedRoute } from "@/lib/scan-evac-paths";
 import { exitWorldPosition } from "@/lib/scan-evac-paths";
 import { waterWorldY } from "@/lib/scan-flood";
 import type { FireFrame, FireRoom, FireRouteDeparture, FireTimeline } from "@/lib/scan-fire";
+import { placeTag, placeToWorld, SPACE_TYPES, type PlaceMatch } from "@/lib/scan-places";
 
 const ROUTE_GREEN = 0x22c55e;
 const ROUTE_RED = 0xef4444;
@@ -423,6 +424,176 @@ export function buildFireRouteLayer(
     },
     dispose: () => {
       for (const d of disposables) d.dispose();
+      group.clear();
+    },
+  };
+}
+
+// Fuchsia, so a found place stands apart from fire orange, smoke grey and the route colors.
+const PLACE_PIN = 0xe879f9;
+const PIN_BEAM_M = 6;
+// Snap to the scan: cast down from this far above the plan floor, and take the hit closest to
+// the plan floor within the tolerance (the first hit can be a table or a stair rail).
+const SNAP_FROM_M = 1.6;
+const SNAP_TOL_M = 0.35;
+// A space whose point lands on a hole in the scan tries rings of points inside its outline.
+const SNAP_RING_RADII_M = [0.6, 1.2, 1.8];
+const SNAP_RING_STEPS = 8;
+const DOWN = new THREE.Vector3(0, -1, 0);
+
+export type PlacePin = {
+  match: PlaceMatch;
+  /** Marker position in the scene: on the scanned floor when snapped, else at the plan height. */
+  at: THREE.Vector3;
+  /** Whether a scanned floor was found under the place. */
+  onScan: boolean;
+};
+
+export type PlacePinLayerObjects = {
+  group: THREE.Group;
+  dispose: () => void;
+};
+
+function insidePolygon(x: number, z: number, poly: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i];
+    const [xj, zj] = poly[j];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function scanFloorAt(
+  raycaster: THREE.Raycaster,
+  scan: THREE.Object3D,
+  x: number,
+  planY: number,
+  z: number,
+): number | null {
+  raycaster.set(new THREE.Vector3(x, planY + SNAP_FROM_M, z), DOWN);
+  raycaster.far = SNAP_FROM_M + SNAP_TOL_M;
+  let best: number | null = null;
+  for (const hit of raycaster.intersectObject(scan, true)) {
+    const d = Math.abs(hit.point.y - planY);
+    if (d <= SNAP_TOL_M && (best === null || d < Math.abs(best - planY))) best = hit.point.y;
+  }
+  return best;
+}
+
+/**
+ * Where a place goes in the scene: its venue-frame point (the fire layer's transform), snapped
+ * down onto the scanned floor. Plan-only places aren't cast; they stay at the plan height.
+ */
+export function resolvePlacePin(
+  match: PlaceMatch,
+  scan: THREE.Object3D,
+  center: ScanCenter,
+  floorY: number,
+): PlacePin {
+  const world = placeToWorld(match.point, center, floorY);
+  const tries: [number, number][] = [[world.x, world.z]];
+  if (match.polygon) {
+    for (const r of SNAP_RING_RADII_M) {
+      for (let k = 0; k < SNAP_RING_STEPS; k++) {
+        const a = (2 * Math.PI * k) / SNAP_RING_STEPS;
+        const [x, z] = [match.point[0] + r * Math.cos(a), match.point[2] + r * Math.sin(a)];
+        if (insidePolygon(x, z, match.polygon)) tries.push([x - center.x, z - center.z]);
+      }
+    }
+  }
+  const raycaster = new THREE.Raycaster();
+  for (const [x, z] of match.scanned ? tries : []) {
+    const y = scanFloorAt(raycaster, scan, x, world.y, z);
+    if (y !== null) return { match, at: new THREE.Vector3(x, y, z), onScan: true };
+  }
+  return { match, at: new THREE.Vector3(world.x, world.y, world.z), onScan: false };
+}
+
+/**
+ * Found places: a dot, a floor ring, a beam and a label, drawn through walls, plus the outline
+ * when the place is a space. Pins off the scan (plan-only) are hollow and say how far off they
+ * may be.
+ */
+export function buildPlacePinLayer(pins: PlacePin[], center: ScanCenter): PlacePinLayerObjects {
+  const group = new THREE.Group();
+  const disposables: Array<THREE.BufferGeometry | THREE.Material> = [];
+  const labelEls: HTMLElement[] = [];
+  const track = <T extends THREE.BufferGeometry | THREE.Material>(d: T): T => {
+    disposables.push(d);
+    return d;
+  };
+  const overlay = (opacity: number, wireframe = false) =>
+    track(
+      new THREE.MeshBasicMaterial({
+        color: PLACE_PIN,
+        transparent: true,
+        opacity,
+        wireframe,
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+
+  for (const pin of pins) {
+    const pinGroup = new THREE.Group();
+    pinGroup.position.copy(pin.at);
+
+    const dot = new THREE.Mesh(
+      track(new THREE.SphereGeometry(0.35, 16, 12)),
+      overlay(pin.onScan ? 1 : 0.8, !pin.onScan),
+    );
+    dot.position.y = 0.35;
+    const ring = new THREE.Mesh(
+      track(new THREE.RingGeometry(0.55, 0.8, 40)),
+      overlay(pin.onScan ? 0.85 : 0.4),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.04;
+    const beam = new THREE.Mesh(
+      track(new THREE.CylinderGeometry(0.05, 0.05, PIN_BEAM_M, 6)),
+      overlay(0.55),
+    );
+    beam.position.y = PIN_BEAM_M / 2;
+    for (const m of [dot, ring, beam]) m.renderOrder = 10;
+
+    const el = document.createElement("div");
+    el.className = "scan-place-pin";
+    el.dataset.onScan = String(pin.onScan);
+    el.textContent = `${pin.match.label} · ${placeTag(pin.match, pin.onScan)}`;
+    const label = new CSS2DObject(el);
+    label.center.set(0.5, 1);
+    label.position.y = PIN_BEAM_M;
+    labelEls.push(el);
+
+    pinGroup.add(dot, ring, beam, label);
+    group.add(pinGroup);
+
+    if (pin.match.polygon && SPACE_TYPES.includes(pin.match.type)) {
+      // The space itself: a faint fill and its outline, laid like the fire layer's floors.
+      const shape = roomShape(pin.match.polygon, center);
+      const area = new THREE.Group();
+      area.rotation.x = -Math.PI / 2;
+      area.position.y = pin.at.y + 0.05;
+      const fill = new THREE.Mesh(track(new THREE.ShapeGeometry(shape)), overlay(0.16));
+      const outline = new THREE.LineLoop(
+        track(new THREE.BufferGeometry().setFromPoints(shape.getPoints())),
+        track(
+          new THREE.LineBasicMaterial({ color: PLACE_PIN, depthTest: false, transparent: true }),
+        ),
+      );
+      fill.renderOrder = outline.renderOrder = 10;
+      area.add(fill, outline);
+      group.add(area);
+    }
+  }
+
+  return {
+    group,
+    dispose: () => {
+      for (const d of disposables) d.dispose();
+      for (const el of labelEls) el.remove();
       group.clear();
     },
   };

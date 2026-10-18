@@ -40,8 +40,12 @@ def geometry(av: AriaVenue) -> dict:
 
 
 def scan_floor_y(av: AriaVenue) -> float | None:
+    return datum_floor_y(av.raw)
+
+
+def datum_floor_y(raw: dict) -> float | None:
     """Room 2's scan Y of elevation 0, read from the frame datum ("elevation = Y_room2 + 3.91")."""
-    m = _DATUM_RE.search(str(av.raw.get("frame", {}).get("datum", "")))
+    m = _DATUM_RE.search(str(raw.get("frame", {}).get("datum", "")))
     if not m:
         return None
     offset = float(m.group(2)) * (1 if m.group(1) == "+" else -1)

@@ -18,6 +18,8 @@ Today it holds 63 spaces (38 on 1F, 24 on 2F, 1 on 3F) and 99 openings: 14 exits
 - **Other scans:** rooms 1 and 3 map in with the transforms in `frame.scan_transforms`. They are good to about ±0.3 m near the junction of the three scans.
 - **Plan positions:** anything read off the annunciator photo uses `frame.photo_to_venue`: x = −7.5 + (937 − X)/10.4 and z = (539 − Y)/10.4, where X and Y are photo pixels. For the 2F plan, subtract 578 from Y first. Expect ±1–2 m, because the photo was taken at an angle.
 - **North is not verified.** If the compass's solid needle is north, north is −z and east is +x.
+  - The venue's own names point the other way: the "west" exterior stair and the Collins Room's "west" exits sit at +x, which this reading calls east.
+  - So compass words are never resolved. Place lookup (`engine.places`) ignores them in a query and says so, and no `aliases` entry uses one.
 - **Polygons** run counter-clockwise in the `[x, z]` plane (positive shoelace area). Seen from above (+Y), where +x is right and +z is down, they look clockwise (`frame.polygon_winding`). The top view from above matches the LA Hacks event map's orientation.
 
 ## Fields
@@ -33,6 +35,7 @@ Today it holds 63 spaces (38 on 1F, 24 on 2F, 1 on 3F) and 99 openings: 14 exits
 |---|---|
 | `id` | See the ID rules below |
 | `name`, `event_name` | Plain name; the LA Hacks map name, or `null` |
+| `aliases` | Optional. Other names people use ("Collins Room", "lobby"), for place lookup. No compass words |
 | `kind` | `room`, `lobby`, `corridor`, `restroom`, `elevator`, `closet`, `outdoor` or `open_to_below`. The schema also allows `stair` and `mech`; none are used yet |
 | `storey`, `is_outdoor` | Storey id; true for courtyards, patios, plaza, lawn and terraces |
 | `polygon` | `[[x, z], …]` in m, counter-clockwise |
@@ -44,6 +47,7 @@ Today it holds 63 spaces (38 on 1F, 24 on 2F, 1 on 3F) and 99 openings: 14 exits
 | `detectors` | Alarm-device dots on the annunciator. One symbol covers all device types |
 | `geometry_source` | `scan`: footprint measured by a scan. `plan_traced`: plan outline, nudged to scan walls where they exist. `plan_bbox`: rectangle from the plan |
 | `scanned_by` | Which scans (`room1`, `room2`, `room3`) cover the space |
+| `pin` | Optional `[x, z]`: where place lookup puts the space's pin, on clear scanned floor. Set where the default point inside the polygon lands on furniture or a hole in the scan (`galleria_far_end`, `120`, `150`) |
 | `notes` | Free text |
 
 **`openings[]`**
@@ -54,6 +58,8 @@ Today it holds 63 spaces (38 on 1F, 24 on 2F, 1 on 3F) and 99 openings: 14 exits
 | `a`, `b` | Space ids. `b` may be `SAFE`. On an exit, `a` is the side people leave from |
 | `kind` | `door`, `double_door`, `opening`, `gate`, `stair`, `ramp`, `step` or `elevator` |
 | `position` | `[x, z]`: the centre of the opening, or the midpoint of the run for a stair or ramp |
+| `aliases` | Optional, as for spaces ("main entrance", "stairs to 2nd floor") |
+| `ends` | Stairs only, optional: `{space id: [x, z]}`, where the stair meets each space. `ST-100`'s come from room 1's scan, `ST-W`'s from the annunciator (±2 m). Without it both ends use `position` |
 | `clear_width` | m |
 | `effective_width` | m. Clear width − 0.30 (0.15 m boundary layer each side, SFPE), never below 0. Fixed at **0** for elevators and floor voids: they carry smoke, not people |
 | `width_source` | `scan`, `plan` or `placeholder` |
@@ -66,6 +72,8 @@ Today it holds 63 spaces (38 on 1F, 24 on 2F, 1 on 3F) and 99 openings: 14 exits
 **`occupant_scenarios[]`** holds the two readings of the event's 2F use. Exactly one has `default: true`, and the spaces' `occupant_load` holds that one. Another scenario lists `overrides` (`{space id: people}`) to swap in.
 - `2F_indoor` (default): reading B, with the indoor 2F rooms at assembly density and the terrace empty. 627 people on 2F and 1,866 in all. It is the stress case.
 - `2F_terrace`: reading A, with the event on the terrace at assembly density and the indoor rooms at business density. 254 people on 2F and 1,493 in all. The event map's "Northeast Patio" captions favour this reading.
+
+**`landmarks[]`** are points people ask for that are not spaces or openings: `id`, `name`, `kind`, `aliases`, `storey`, `space` (the space it is in), `position` `[x, z]`, `elevation`, `approx_m`, `position_source`, `notes`. Add one only where its position is known from data. Today there is one, the ANN / YOU ARE HERE panel, read off the annunciator. The check-in desk, the stage and the sponsor rows wait until someone confirms them on site.
 
 **`unknowns[]`** lists what the plans and scans don't settle; treat each one conservatively.
 
