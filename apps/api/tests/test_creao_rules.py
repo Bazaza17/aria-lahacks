@@ -49,7 +49,10 @@ def test_alert_asks_the_question() -> None:
 @pytest.mark.parametrize(
     ("text", "zone"),
     [
-        ("Hi I’m in the Collin’s room right now", "collins_room"),  # curly apostrophes, from a real phone
+        (
+            "Hi I’m in the Collin’s room right now",
+            "collins_room",
+        ),  # curly apostrophes, from a real phone
         ("hi, in the collins room", "collins_room"),
         ("I'm in the Founder's room", "founders_room"),
     ],
