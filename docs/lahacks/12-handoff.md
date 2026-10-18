@@ -54,3 +54,24 @@ The state of the engine and scan work, in case a session ends mid-task. Newest f
 2. **Read the merged `fire-viewer` branch** (`a105ec9`) before building any viewer integration. It may already draw the teammate's fire output (`apps/web/public/fire/venue.json`).
 3. **Wire the engine into the API** (a FastAPI route that runs `engine.demo`'s pipeline) and the viewer (fire spread plus predictive vs reactive routes on the four-room scan).
 4. **Upload the four-room web GLB** and set the venue's `scan_url` (venue id `547b5ec5-30c5-4f76-8080-012a52e90bd9`). The viewer needs no code change: it uses the database `scan_url` for the venue.
+
+## Update, Sun ~12:45 AM
+
+- **Engine slice 1 is committed.**
+  - `3adb8bd`: the capacity-aware plan, flashover by upper-layer temperature, and the viewer output. 26 tests pass.
+  - `docs/lahacks/img/engine_run_collins.png` is a picture of one run.
+- **Viewer integration is committed** (`6ba2e7f`).
+  - `/fire-preview` shows the four-room scan with polygon rooms on all storeys: smoke layers, door markers, and route tubes. Aria's plan is blue, self-chosen routes that fail are red.
+  - The header gives the people at risk if everyone leaves now.
+  - It needs `apps/web/public/scans/venue_4rooms_web.glb` locally (gitignored).
+- **Regenerate the viewer data:**
+  ```bash
+  cd packages/engine
+  uv run python -m engine.demo --start 140 --frame-step 10 --departures 0,60,120,180,240,300,420 --viewer-out ../../apps/web/public/fire/venue.json
+  ```
+- **Tell the fire-viewer teammate:** `public/fire/venue.json` is now the engine's venue-frame output, and `FireTimeline` gained optional `polygon`, `floor_elevation_m` and `routes`.
+- **Next:**
+  1. Upload the GLB and set `scan_url`, so `/building/<venue id>` shows the scan. Also set `NEXT_PUBLIC_VENUE_BUILDING_ID` so that page loads `/fire/venue.json`.
+  2. Deploy.
+  3. Camera and lighting polish.
+  4. Agents and report.
