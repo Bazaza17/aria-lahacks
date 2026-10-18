@@ -802,6 +802,14 @@ async def creao_run_result(
     if run is None:
         raise HTTPException(404, "Unknown run")
     if run.status not in ("done", "failed"):
+        # CREAO has no custom connector: the agent's tool calls come back in its reply
+        if ran := await bridge.apply_actions(run, body):
+            await session.refresh(run)
+            ok = sum(1 for a in ran if a.get("ok"))
+            await agents.record_action(
+                session, run, "actions", f"Aria ran {ok} of {len(ran)} action(s) from the reply"
+            )
+    if run.status not in ("done", "failed"):
         failed = str(body.get("status", "")).lower() in ("failed", "error")
         await agents.finish_run(
             session, run, summary=_summary(body), error=_summary(body) if failed else None
