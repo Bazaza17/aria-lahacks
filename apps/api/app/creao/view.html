@@ -195,7 +195,7 @@
       <span class="now" id="agentNow">Waiting for the command staff</span><button id="agentToggle" aria-expanded="false">6 agents · details</button></div>
     <div id="staff"></div>
     <div id="fireline" aria-live="polite"></div>
-    <div class="floorbar"><div style="display:flex;gap:10px;align-items:center"><div class="tabs" id="tabs"></div><span class="scanbadge" id="scanBadge"></span></div><span class="hint">Hover a person for their exit · click a pin for the report · drag to orbit</span></div>
+    <div class="floorbar"><div style="display:flex;gap:10px;align-items:center"><div class="tabs" id="tabs"></div><span class="scanbadge" id="scanBadge"></span></div><span class="hint">Hover a person for their exit · click a pin for the report · drag to orbit · right-drag to pan · scroll to zoom</span></div>
     <div id="plan"><div id="scene"></div><div class="noscan" id="noScan"></div><div id="hover"></div></div>
     <div class="legend">
       <span><i style="background:#fff"></i>On the move</span>
@@ -643,8 +643,17 @@ if (renderer) {
   scene.add(new THREE.HemisphereLight(0xffffff, 0x202020, 1.1));
   const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(-30, 80, 40); scene.add(sun);
   camera = new THREE.PerspectiveCamera(40, 1, 0.5, 600);
-  controls = new OrbitControls(camera, labels.domElement);
+  // On the canvas: the labels layer above it ignores the pointer (pointer-events: none), so
+  // controls bound to it never saw a drag. Drag to orbit, right-drag (or shift-drag) to pan,
+  // scroll to zoom.
+  controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = 0.08; controls.maxPolarAngle = Math.PI * 0.47;
+  controls.screenSpacePanning = true; controls.minDistance = 4; controls.maxDistance = 220;
+  controls.zoomToCursor = true;
+  renderer.domElement.style.cursor = "grab";
+  renderer.domElement.style.touchAction = "none";
+  renderer.domElement.addEventListener("pointerdown", () => { renderer.domElement.style.cursor = "grabbing"; });
+  window.addEventListener("pointerup", () => { renderer.domElement.style.cursor = "grab"; });
   liveGroup = new THREE.Group(); scanGroup = new THREE.Group();
   ground = new THREE.GridHelper(120, 60, 0x2a2d31, 0x15171a);  // only until the scan is in
   scene.add(scanGroup, ground, liveGroup);
