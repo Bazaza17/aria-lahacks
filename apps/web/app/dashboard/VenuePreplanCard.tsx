@@ -86,21 +86,23 @@ export function VenuePreplanCard({ building }: { building: Building }) {
                 label={
                   <>
                     <span aria-hidden className="h-[2px] w-3.5 bg-white" />
-                    At risk on Aria&apos;s routes
+                    Rooms at risk on Aria&apos;s routes
                   </>
                 }
               >
-                {atStart.plan.at_risk}
+                {atStart.plan.rooms_at_risk} / {atStart.rooms}
               </Row>
               <Row
                 label={
                   <>
                     <span aria-hidden className="h-[2px] w-3.5 bg-fire" />
-                    At risk finding their own way
+                    Rooms at risk finding their own way
                   </>
                 }
               >
-                <span className="text-fire">{atStart.self.at_risk}</span>
+                <span className="text-fire">
+                  {atStart.self.rooms_at_risk} / {atStart.rooms}
+                </span>
               </Row>
             </>
           )}

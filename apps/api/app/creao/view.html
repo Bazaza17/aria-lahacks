@@ -471,7 +471,10 @@ function renderFireline() {
   if (!S.s?.evacuation || !fm) { el.classList.remove("on"); el.innerHTML = ""; return; }
   const now = S.s.evacuation.minute_now || 0;
   const lost = (sm?.exits_lost || []).slice(0, 6).map((x) => `<span class="x ${x.minute <= now ? "gone" : ""}" title="${esc(x.label)}">${esc(shortLabel(x.label))}<b>${mmss(x.minute, x.t_s)}</b></span>`).join("");
-  const risk = sm ? `${sm.at_risk_leaving_now ?? "–"} of ${sm.occupants} at risk leaving now${sm.last_out_min != null ? ` · last out ${mmss(sm.last_out_min, sm.last_out_s)}` : ""} · ${sm.at_risk_obvious_route ?? "–"} by the obvious way` : "";
+  // rooms, not people: crowds are modelled at each room's assumed capacity, not a headcount
+  const risk = !sm ? "" : sm.rooms_occupied != null
+    ? `${sm.rooms_at_risk_leaving_now} of ${sm.rooms_occupied} rooms at risk leaving now${sm.last_out_min != null ? ` · last out ${mmss(sm.last_out_min, sm.last_out_s)}` : ""} · ${sm.rooms_at_risk_obvious_route} by the obvious way`
+    : `last out ${sm.last_out_min != null ? mmss(sm.last_out_min, sm.last_out_s) : "–"}`;
   el.innerHTML = `<span class="tag">${fm.source === "aria-engine" ? "ENGINE · SIMULATION" : "FIRE MODEL · " + esc((fm.source || "manual").toUpperCase())}</span>
     <span>Fire starts in <b>${esc(fm.origin?.label || S.origin || "?")}</b>${sm?.growth ? ` · ${esc(sm.growth)} growth` : ""}</span>
     ${lost ? `<span class="x">Exits lost:</span>${lost}` : ""}<span class="risk">${esc(risk)}</span>`;

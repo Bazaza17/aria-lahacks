@@ -189,6 +189,18 @@ def _summary(building: Building, result: dict, start: str, origin_label: str) ->
         f["last_out_s"] for f in flows if f.get("cleared") and f.get("last_out_s") is not None
     ]
     at_risk = dep0.get("occupants_at_risk") or {}
+    # Crowds are modelled at assumed capacity, so the console reports rooms, not people.
+    occupied = [s for s in (dep0.get("spaces") or {}).values() if s.get("occupants")]
+
+    def rooms_at_risk(mode: str) -> int:
+        return sum(
+            1
+            for s in occupied
+            if (s.get(mode) or {}).get("at_risk")
+            or ((s.get(mode) or {}).get("status") or "ok") != "ok"
+        )
+
+    rooms_plan, rooms_self = rooms_at_risk("predictive"), rooms_at_risk("reactive")
     growth = result["scenario"].get("growth")
     first_bad = summ.get("first_untenable_beyond_origin") or summ.get("first_untenable") or {}
     lost_txt = (
@@ -198,9 +210,10 @@ def _summary(building: Building, result: dict, start: str, origin_label: str) ->
     text = (
         f"Simulation (Aria's engine, {growth} growth): fire starts in {origin_label}. "
         f"Exits lost: {lost_txt}. Leaving now on Aria's routes: "
-        f"{at_risk.get('predictive', 0)} of {occupants} people inside at risk"
-        + (f", last person out at minute {max(last_out) / 60:.1f}" if last_out else "")
-        + f"; by the obvious way out instead: {at_risk.get('reactive', 0)} at risk."
+        f"{rooms_plan} of {len(occupied)} occupied rooms have people at risk"
+        + (f", last group out at minute {max(last_out) / 60:.1f}" if last_out else "")
+        + f"; by the obvious way out instead: {rooms_self} rooms at risk. (Crowds are modelled "
+        "at each room's assumed capacity, not a headcount.)"
     )
     return {
         "engine": SOURCE,
@@ -212,6 +225,9 @@ def _summary(building: Building, result: dict, start: str, origin_label: str) ->
         "occupants": occupants,
         "at_risk_leaving_now": at_risk.get("predictive"),
         "at_risk_obvious_route": at_risk.get("reactive"),
+        "rooms_occupied": len(occupied),
+        "rooms_at_risk_leaving_now": rooms_plan,
+        "rooms_at_risk_obvious_route": rooms_self,
         "last_out_min": round(max(last_out) / 60, 1) if last_out else None,
         "last_out_s": round(max(last_out), 1) if last_out else None,
         "first_untenable": {

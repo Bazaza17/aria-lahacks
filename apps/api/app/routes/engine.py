@@ -205,7 +205,8 @@ SIZEUP_ASSUMPTIONS = [
     "are indicative only.",
     "Untenable: smoke layer below 2 m or hotter than 200 C; the room of origin once the fire "
     "radiates 2.5 kW/m2 at 3 m.",
-    "Occupants: the event-night load per room (2nd-floor workshops indoors), moving as groups "
+    "Crowds: every room is modelled at its full assumed capacity (NFPA occupant load, 2nd-floor "
+    "workshops indoors), not a headcount, so results are given in rooms, not people. Groups move "
     "at SFPE walking speeds and door and stair flows, starting the moment they leave.",
     "Elevators are not used for evacuation.",
     "Connections marked uncertain in the venue data are modelled open: check them on site.",
@@ -219,29 +220,38 @@ def _mark(row: dict | None) -> dict | None:
     return {"t_s": row["t_s"], "space": sid, "name": _space_name(sid)}
 
 
+def _room_at_risk(route: dict) -> bool:
+    """A room is at risk when anyone in it can't get out on that route in time."""
+    return bool(route.get("at_risk")) or (route.get("status") or "ok") != "ok"
+
+
 def _all_out(dep: dict, mode: str) -> dict:
-    """People at risk and when the last person who gets out is out, for one departure time."""
-    at_risk = 0
+    """Rooms (and modelled people) at risk, and when the last group out is out, for one
+    departure time. The web shows rooms: the people counts rest on assumed capacities."""
+    at_risk = rooms_at_risk = 0
     last = None
     for sp in dep["spaces"].values():
         if not sp.get("occupants"):
             continue
         route = sp.get(mode) or {}
         at_risk += route.get("at_risk") or 0
+        rooms_at_risk += _room_at_risk(route)
         flow = route.get("flow") or {}
         if flow.get("cleared") and flow.get("last_out_s") is not None:
             last = max(last or 0.0, float(flow["last_out_s"]))
-    return {"at_risk": at_risk, "last_out_s": last}
+    return {"at_risk": at_risk, "rooms_at_risk": rooms_at_risk, "last_out_s": last}
 
 
 def _departures(result: dict) -> list[dict]:
     out = []
     for dep in result["routes"]["departures"]:
         occupants = sum(sp.get("occupants") or 0 for sp in dep["spaces"].values())
+        rooms = sum(1 for sp in dep["spaces"].values() if sp.get("occupants"))
         out.append(
             {
                 "t0_s": dep["t0_s"],
                 "occupants": occupants,
+                "rooms": rooms,
                 "plan": _all_out(dep, "predictive"),
                 "self": _all_out(dep, "reactive"),
             }
@@ -304,18 +314,19 @@ def _exits(result: dict) -> dict:
 def _best_on_grid(departures: list[dict], flashover_s: float | None) -> dict | None:
     """Where Aria's plan matters most, on the panel's own departure times (the engine's
     best_moment scans every 15 s, so its time can fall between them and the panel's numbers
-    wouldn't match). Before the first flashover, the most people saved; earliest on ties."""
+    wouldn't match). Before the first flashover, the most rooms saved; earliest on ties."""
     best = None
     for d in departures:
         if flashover_s is not None and d["t0_s"] >= flashover_s:
             continue
-        saved = d["self"]["at_risk"] - d["plan"]["at_risk"]
-        if saved > 0 and (best is None or saved > best["saved"]):
+        saved = d["self"]["rooms_at_risk"] - d["plan"]["rooms_at_risk"]
+        if saved > 0 and (best is None or saved > best["rooms_saved"]):
             best = {
                 "t0_s": d["t0_s"],
-                "plan_at_risk": d["plan"]["at_risk"],
-                "self_at_risk": d["self"]["at_risk"],
-                "saved": saved,
+                "plan_rooms_at_risk": d["plan"]["rooms_at_risk"],
+                "self_rooms_at_risk": d["self"]["rooms_at_risk"],
+                "rooms_saved": saved,
+                "rooms": d["rooms"],
             }
     return best
 

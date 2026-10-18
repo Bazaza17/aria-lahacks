@@ -157,24 +157,24 @@ export function SizeUpPanel({ buildingId }: { buildingId: string }) {
       {dep && (
         <Section title="Evacuation" meta={`Leave at T+${formatClock(dep.t0_s)}`} n={2}>
           <div>
-            <Row label="People in the building" value={dep.occupants.toLocaleString()} />
+            <Row label="Occupied rooms" value={dep.rooms} />
             <Row
               label={
                 <>
                   <Swatch className="bg-fg" />
-                  At risk following Aria&apos;s routes
+                  Rooms at risk on Aria&apos;s routes
                 </>
               }
-              value={dep.plan.at_risk}
+              value={dep.plan.rooms_at_risk}
             />
             <Row
               label={
                 <>
                   <Swatch className="bg-fire" />
-                  At risk finding their own way
+                  Rooms at risk finding their own way
                 </>
               }
-              value={dep.self.at_risk}
+              value={dep.self.rooms_at_risk}
               valueClass="text-fire"
             />
             <Row
@@ -257,8 +257,10 @@ export function SizeUpPanel({ buildingId }: { buildingId: string }) {
       {best && (
         <Section title="Where Aria's plan matters most" n={5}>
           <p className="text-[13px] leading-[20px] text-soft">
-            Leaving at T+{formatClock(best.t0_s)}, Aria&apos;s routes leave {best.plan_at_risk} at
-            risk against {best.self_at_risk} on self-chosen routes: {best.saved} more people out.
+            Leaving at T+{formatClock(best.t0_s)}, Aria&apos;s routes leave{" "}
+            {best.plan_rooms_at_risk} of {best.rooms} occupied rooms at risk, against{" "}
+            {best.self_rooms_at_risk} when people find their own way: {best.rooms_saved} more rooms
+            get everyone out.
           </p>
           <button
             type="button"

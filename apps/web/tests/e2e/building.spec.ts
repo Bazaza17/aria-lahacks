@@ -16,7 +16,7 @@ test.describe("Venue pre-plan", () => {
     await expect(page.locator("canvas").first()).toBeVisible({ timeout: 90_000 });
 
     // The panel follows the engine's default start, then a new one.
-    await expect(page.getByText("People in the building")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Occupied rooms")).toBeVisible({ timeout: 30_000 });
     const picker = page.getByLabel("Space the fire starts in");
     await picker.selectOption("120");
     await expect(picker).toHaveValue("120");

@@ -55,14 +55,11 @@ docker exec tiger-local psql -U postgres -c "CREATE DATABASE aria_live"
 uv run python scripts/creao_standin.py --print-env >> .env   # rehearse the CREAO staff without CREAO
 uv run uvicorn app.main:app --port 8000 --timeout-graceful-shutdown 5   # open SSE streams otherwise block shutdown
 uv run python scripts/creao_standin.py                      # second terminal: scripted CREAO agents (no AI)
-uv run python scripts/live_feed.py --approve                # third terminal: a scripted drill (localhost only)
 curl -N "http://localhost:8000/live/stream?building_id=547b5ec5-30c5-4f76-8080-012a52e90bd9"
 ```
 
-`live_feed.py` declares its drill with an origin (`--origin galleria` by default, or any id
-from `GET /engine/starts`), so the fire model and routes come from the engine. Its people are fake
-(+1555500xxxx) and every event it posts is tagged `source: "simulated"`. It refuses a non-localhost
-`--base` unless `--allow-remote` is passed: a deployed API has the real database and messenger.
+To rehearse, declare a drill from the console (`/live/view`) and text the line from a real
+phone: there is no scripted feed of invented people any more.
 
 `GET /live/health` shows the database (TimescaleDB, hypertables, triggers, aggregate), whether the
 TigerData LISTEN is connected, and which CREAO agents are configured. On the laptop with no keys
@@ -136,7 +133,7 @@ POST /live/intake/events
 {"eventId": "evt_1042",            // unique; a retry with the same id is acknowledged, never applied twice
  "eventType": "sms.received",      // sms.received | sms.sent | location.updated | occupant.status
                                    // | call.started | call.transcript | call.details | call.ended
- "source": "photon",                // "simulated" for scripted events (live_feed.py)
+ "source": "photon",
  "payload": {"buildingId": "547b5ec5-…", "phone": "+15553000020", "text": "rear door is jammed",
              "conversationId": "conv_…", "role": "user", "lat": 34.07, "lng": -118.44, "accuracyMeters": 8}}
 ```

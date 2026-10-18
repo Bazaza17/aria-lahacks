@@ -656,11 +656,9 @@ function Caption({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** In words, not headcounts: crowds are modelled at each room's assumed capacity. */
 function routeOutcome(route: FireRoute): string {
-  if (route.at_risk > 0) {
-    if (route.status === "trapped") return `${route.at_risk} trapped`;
-    return `${route.at_risk} at risk`;
-  }
+  if (route.at_risk > 0) return route.status === "trapped" ? "trapped" : "people at risk";
   return "all out";
 }
 
@@ -752,7 +750,7 @@ function ScanSelectionCard({
               </span>
             </span>
             <span className={`shrink-0 ${r.at_risk > 0 ? "text-fire" : "text-dim"}`}>
-              {r.occupants} · {routeOutcome(r)}
+              {routeOutcome(r)}
             </span>
           </div>
         ))}

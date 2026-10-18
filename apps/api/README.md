@@ -30,8 +30,7 @@ apps/api/
 │   └── creao/             # the live layer: models, rules, planning, CREAO agents, MCP tools
 │       └── buildings/     # per-building profiles the live layer reads
 ├── scripts/
-│   ├── creao_standin.py   # rehearse the CREAO staff without CREAO
-│   └── live_feed.py       # scripted drill feed for local testing
+│   └── creao_standin.py   # rehearse the CREAO staff without CREAO
 ├── tests/
 ├── Dockerfile             # built from the repo root (it copies packages/engine)
 └── dev.sh                 # uvicorn with reload on :8000

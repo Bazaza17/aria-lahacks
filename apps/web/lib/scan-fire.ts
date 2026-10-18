@@ -146,10 +146,13 @@ export async function loadFireTimeline(
 /** The responder size-up for one scenario (GET /engine/summary → sizeup). */
 export type SizeUpPlace = { t_s: number; space: string | null; name: string };
 export type SizeUpExit = { exit: string; label: string; from?: string; lost_s?: number };
-export type SizeUpOutcome = { at_risk: number; last_out_s: number | null };
+/** at_risk counts modelled people (assumed capacities); the UI shows rooms_at_risk. */
+export type SizeUpOutcome = { at_risk: number; rooms_at_risk: number; last_out_s: number | null };
 export type SizeUpDeparture = {
   t0_s: number;
   occupants: number;
+  /** Occupied rooms at this departure. */
+  rooms: number;
   plan: SizeUpOutcome;
   self: SizeUpOutcome;
 };
@@ -181,9 +184,10 @@ export type SizeUp = {
   check_on_site: { opening: string; between: [string, string]; note: string }[];
   best_moment: {
     t0_s: number;
-    plan_at_risk: number;
-    self_at_risk: number;
-    saved: number;
+    plan_rooms_at_risk: number;
+    self_rooms_at_risk: number;
+    rooms_saved: number;
+    rooms: number;
   } | null;
   assumptions: string[];
   provenance: string;
