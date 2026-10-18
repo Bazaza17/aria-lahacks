@@ -7,21 +7,23 @@ This module bridges the two and keeps the id maps both ways:
 
 - Indoor spaces become rooms. Every skylight well (kind `open_to_below`) and the spaces under it
   become ONE tall room, so the atrium fills as one volume. The 2F openings that face a well
-  become doors of that room at the 2F level, so atrium smoke spills onto the 2F.
+  become doors of that room at the 2F level, so atrium smoke spills onto the 2F. Two spaces
+  joined by a `step` band (no wall, no door: 140 and 150) also become one room.
 - Openings become doors, open or closed per EVENT_NIGHT_RULES (one table, overridable).
 - An interior stair between two ordinary rooms becomes a stair shaft room (engine.venue's
   `kind="stair"`) with a door at each end. Elevators are not egress; their shafts are not
   modelled.
 - Outdoor spaces and SAFE are the fire model's "outside": smoke vents there, fire never spreads.
 
-It also builds the routing graph: every space plus SAFE as nodes, walkable openings as edges
-(both directions) timed at SFPE walking speeds.
+It also builds the routing graph (engine.route_graph): every space plus SAFE as nodes, walkable
+openings as arcs (both directions), door-to-door legs at SFPE walking speeds.
 
     from engine.aria_venue import load_aria_venue
     av = load_aria_venue(origin_space="140")
     av.fire              # engine.venue.Venue for engine.fire.simulate
     av.graph             # RouteGraph for engine.routes
     av.room_of["110"]    # "atrium:110"
+    av.room_of["140"]    # "room:140+150"
 """
 
 from __future__ import annotations
@@ -33,24 +35,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from engine.constants import DEFAULT_DOOR_HEIGHT_M, FUEL_CLASSES
+from engine.geometry import Point, bbox, perimeter, shoelace
+from engine.route_graph import (  # noqa: F401  (re-exported: the routing graph lives there)
+    K_LEVEL_M_S,
+    K_STAIR_M_S,
+    SAFE,
+    WALK_LEVEL_M_S,
+    WALK_RAMP_M_S,
+    WALK_STAIR_M_S,
+    Arc,
+    Node,
+    RouteGraph,
+    build_route_graph,
+    position,
+    stair_run,
+)
 from engine.venue import OUTSIDE, Door, Exit, Room, Venue
 
 VENUE_JSON = Path(__file__).resolve().parent.parent / "venue.json"
-SAFE = "SAFE"  # venue.json's single sink node for the public way
-
-# --- Walking speeds for the routing graph. ---
-# SFPE hydraulic egress model (Nelson & Mowrer; Gwynne & Rosenbaum, SFPE Handbook 5th ed.):
-# S = k (1 - 0.266 D) for densities D >= 0.54 persons/m². Below 0.54 people walk at the free
-# speed k (1 - 0.266 * 0.54) = 0.856 k. Slice 1 routes one walker per space with no queues,
-# so every edge uses the free speed. Crowd density and door flow come with the crowd slice.
-SFPE_FREE_SPEED_FACTOR = 1.0 - 0.266 * 0.54
-K_LEVEL_M_S = 1.40  # SFPE k: corridors, doorways, level floors
-K_STAIR_M_S = 1.08  # SFPE k: 7 in riser / 11 in tread stairs, speed along the line of travel
-WALK_LEVEL_M_S = K_LEVEL_M_S * SFPE_FREE_SPEED_FACTOR  # ~1.20 m/s
-WALK_STAIR_M_S = K_STAIR_M_S * SFPE_FREE_SPEED_FACTOR  # ~0.92 m/s
-WALK_RAMP_M_S = WALK_LEVEL_M_S  # ASSUMPTION: a 1:12 ramp is walked at the level speed
-RISER_M = 0.178  # 7 in. With TREAD_M, turns a stair's rise into a run when no length is given
-TREAD_M = 0.279  # 11 in
 
 # --- Fire-model mapping. ---
 DEFAULT_CEILING_M = 3.0  # VENUE.md's placeholder height, used when a space has none
@@ -58,7 +60,9 @@ RATED_STAIR_DOOR_MIN = 60.0  # 1-hour stair/shaft enclosure -> 60-min door (IBC 
 ELEVATOR_DOOR_MIN = 60.0  # ASSUMPTION: hoistway doors rated like a 1-hour shaft's doors
 MIN_DOOR_HEIGHT_M = 0.3
 SERVICE_KINDS = ("restroom", "closet", "mech", "elevator")
-NON_WALKING_KINDS = ("open_to_below", "elevator")  # spaces nobody evacuates from
+NON_WALKING_KINDS = ("open_to_below", "elevator")  # spaces nobody evacuates from (or ignites)
+OPENABLE_FOR_A_SEALED_ORIGIN = ("service_door", "exterior_door")
+DOOR_KINDS = ("door", "double_door")  # have a leaf: "no wall" style notes don't make them taller
 
 
 @dataclass(frozen=True)
@@ -130,69 +134,6 @@ _HEADER_RE = re.compile(
 _FULL_HEIGHT_RE = re.compile(r"no wall|at (?:any|every) height", re.IGNORECASE)
 
 
-# --- Polygon helpers (plan [x, z]). ---
-Point = tuple[float, float]
-
-
-def _shoelace(poly: list[Point]) -> float:
-    return 0.5 * sum(
-        x0 * z1 - x1 * z0 for (x0, z0), (x1, z1) in zip(poly, poly[1:] + poly[:1], strict=True)
-    )
-
-
-def _perimeter(poly: list[Point]) -> float:
-    pairs = zip(poly, poly[1:] + poly[:1], strict=True)
-    return sum(math.dist(p, q) for p, q in pairs) if len(poly) > 1 else 0.0
-
-
-def _centroid(poly: list[Point]) -> Point:
-    a = _shoelace(poly)
-    if abs(a) < 1e-9:
-        return (sum(p[0] for p in poly) / len(poly), sum(p[1] for p in poly) / len(poly))
-    cx = cz = 0.0
-    for (x0, z0), (x1, z1) in zip(poly, poly[1:] + poly[:1], strict=True):
-        cross = x0 * z1 - x1 * z0
-        cx += (x0 + x1) * cross
-        cz += (z0 + z1) * cross
-    return (cx / (6.0 * a), cz / (6.0 * a))
-
-
-def _inside(p: Point, poly: list[Point]) -> bool:
-    x, z = p
-    inside = False
-    for (x0, z0), (x1, z1) in zip(poly, poly[1:] + poly[:1], strict=True):
-        if (z0 > z) != (z1 > z) and x < x0 + (z - z0) * (x1 - x0) / (z1 - z0):
-            inside = not inside
-    return inside
-
-
-def representative_point(poly: list[Point]) -> Point:
-    """A point inside the polygon: its centroid, or (for an L or C shape whose centroid falls
-    outside) the middle of the widest inside run along the centroid's z line."""
-    c = _centroid(poly)
-    if _inside(c, poly):
-        return c
-    z = c[1] + 1e-7
-    xs = sorted(
-        x0 + (z - z0) * (x1 - x0) / (z1 - z0)
-        for (x0, z0), (x1, z1) in zip(poly, poly[1:] + poly[:1], strict=True)
-        if (z0 > z) != (z1 > z)
-    )
-    runs = [(xs[i], xs[i + 1]) for i in range(0, len(xs) - 1, 2)]
-    if not runs:
-        return c
-    lo, hi = max(runs, key=lambda r: r[1] - r[0])
-    return ((lo + hi) / 2.0, c[1])
-
-
-def _bbox(polys: list[list[Point]]) -> tuple[float, float, float, float] | None:
-    pts = [p for poly in polys for p in poly]
-    if not pts:
-        return None
-    xs, zs = [p[0] for p in pts], [p[1] for p in pts]
-    return (min(xs), max(xs), min(zs), max(zs))
-
-
 # --- The venue.json data, with defaults for missing fields. ---
 @dataclass
 class _Data:
@@ -224,7 +165,7 @@ class _Data:
 
     def area(self, sid: str) -> float:
         a = self.spaces[sid].get("area")
-        return float(a) if a else max(abs(_shoelace(self.polygon(sid))), 1.0)
+        return float(a) if a else max(abs(shoelace(self.polygon(sid))), 1.0)
 
     def label(self, sid: str) -> str:
         if sid == SAFE:
@@ -279,8 +220,13 @@ def _is_event_space(d: _Data, sid: str) -> bool:
     return bool(s.get("event_name")) or "assembly" in (s.get("occupant_load_source") or "").lower()
 
 
-# --- Skylight wells: merge each open_to_below space with the spaces under it. ---
+# --- Merged fire rooms: skylight wells with the spaces under them, and step bands. ---
 def _merge_groups(d: _Data) -> dict[str, list[str]]:
+    """Union-find over two kinds of link, both read from the data:
+    - a skylight well (open_to_below) and the lower-floor space its floor void opens onto;
+    - two indoor spaces joined by a `step` opening: a step band across an open floor, with no
+      wall or door, so the two parts share one ceiling and one smoke layer (140/150).
+    A group with a well is `atrium:<anchor>`; one without is `room:<a>+<b>`."""
     parent: dict[str, str] = {}
 
     def find(x: str) -> str:
@@ -294,6 +240,8 @@ def _merge_groups(d: _Data) -> dict[str, list[str]]:
         a, b = o.get("a"), o.get("b")
         if not (d.indoor(a) and d.indoor(b)):
             continue
+        if o.get("kind") == "step" and d.floor(a) == d.floor(b):
+            parent[find(a)] = find(b)
         for well, below in ((a, b), (b, a)):
             if d.kind(well) == "open_to_below" and d.floor(below) < d.floor(well):
                 parent[find(well)] = find(below)
@@ -303,9 +251,13 @@ def _merge_groups(d: _Data) -> dict[str, list[str]]:
     merged = {}
     for members in groups.values():
         base = [m for m in members if d.kind(m) != "open_to_below"] or members
-        anchor = min(base, key=lambda m: (d.floor(m), -d.area(m), m))
         wells = sorted(m for m in members if m not in base)
-        merged[f"atrium:{anchor}"] = sorted(base, key=lambda m: -d.area(m)) + wells
+        if wells:
+            anchor = min(base, key=lambda m: (d.floor(m), -d.area(m), m))
+            rid = f"atrium:{anchor}"
+        else:
+            rid = "room:" + "+".join(sorted(base))
+        merged[rid] = sorted(base, key=lambda m: -d.area(m)) + wells
     return merged
 
 
@@ -325,21 +277,26 @@ def _merged_room(d: _Data, rid: str, members: list[str]) -> tuple[Room, dict]:
         for o in d.openings.values()
         if o.get("a") in base and o.get("b") in base
     )
-    perimeter = sum(_perimeter(d.polygon(m)) for m in base) - 2.0 * internal
+    perim = sum(perimeter(d.polygon(m)) for m in base) - 2.0 * internal
     # Equivalent box: the true top (the wells' skylights) and the true volume. Its ceiling then
     # meets the 2F well edges where the real wells do, so smoke crosses them at the right
     # height in both directions; its floor area is volume / height.
     top = max(d.floor_elevation(m) + d.height(m) for m in members)
     height = max(top - d.elevation_of_floor.get(floor, 0.0), max(d.height(m) for m in base))
+    if wells:
+        name = f"Atrium ({' + '.join(base)} + {len(wells)} skylight wells)"
+    else:
+        event = d.spaces[base[0]].get("event_name")
+        name = f"{event or 'Merged room'} ({' + '.join(base)})"
     room = Room(
         id=rid,
-        name=f"Atrium ({' + '.join(base)} + {len(wells)} skylight wells)",
+        name=name,
         floor=floor,
         area_m2=volume / height,
         ceiling_height_m=height,
         fuel_class=_fuel_class(d, base[0]),
-        perimeter_m=max(perimeter, 4.0 * math.sqrt(area)),
-        footprint=_bbox([d.polygon(m) for m in members]),
+        perimeter_m=max(perim, 4.0 * math.sqrt(area)),
+        footprint=bbox([d.polygon(m) for m in members]),
     )
     info = {
         "spaces": members,
@@ -351,6 +308,7 @@ def _merged_room(d: _Data, rid: str, members: list[str]) -> tuple[Room, dict]:
         "box_height_m": round(height, 2),
         "top_elevation_m": round(top, 2),
         "fuel_class": room.fuel_class,
+        "why": "skylight wells over the floor spaces" if wells else "step band, no wall",
     }
     return room, info
 
@@ -404,13 +362,38 @@ def _door_states(
             "why": rule.why if rule else NOT_A_FIRE_DOOR[category],
             "changed_by": None,
         }
-        sides = {room_of.get(o.get("a")), room_of.get(o.get("b"))}
-        if open_origin_doors and category == "service_door" and origin_room in sides:
-            state.update(open=True, changed_by="origin room: its interior doors are open")
         if oid in overrides and rule is not None:
             state.update(open=overrides[oid], changed_by="override")
         states[oid] = state
+    if open_origin_doors and origin_room is not None:
+        _vent_a_sealed_origin(d, room_of, origin_room, states, overrides)
     return states
+
+
+def _vent_a_sealed_origin(
+    d: _Data,
+    room_of: dict[str, str],
+    origin_room: str,
+    states: dict[str, dict],
+    overrides: dict[str, bool],
+) -> None:
+    """A room with no open opening has no air in the zone model, so its fire starves at 0 kW.
+    Only then are its closed doors opened (a door left open, a window broken). A room with an
+    open connection keeps its doors as the table sets them."""
+    own = [
+        oid
+        for oid, o in d.openings.items()
+        if origin_room in (room_of.get(o.get("a")), room_of.get(o.get("b")))
+        and states[oid]["category"] in EVENT_NIGHT_RULES
+    ]
+    if any(states[oid]["open"] for oid in own):
+        return
+    for oid in own:
+        if states[oid]["category"] in OPENABLE_FOR_A_SEALED_ORIGIN and oid not in overrides:
+            states[oid].update(
+                open=True,
+                changed_by="origin room had no open opening (the fire would starve): opened",
+            )
 
 
 # --- Fire doors and stair shafts. ---
@@ -422,20 +405,29 @@ def _door_floor(d: _Data, o: dict, room_of: dict[str, str], merged: dict) -> int
     return max(d.floor(s) for s in indoor)
 
 
-def _door_height(d: _Data, o: dict, category: str) -> float:
+def _door_top(d: _Data, o: dict, category: str, door_floor: int) -> float:
+    """Elevation of the opening's top (venue frame). An explicit `head_height` (m above the
+    higher floor) wins; then a lintel/header height in the notes; then full height (the lower
+    ceiling) for wells, open stairs, steps, ramps and leafless openings whose notes say "no wall"
+    or "at any height"; else a 2.1 m door. Heights are above the higher of the two floors."""
+    indoor = [s for s in (o["a"], o["b"]) if d.indoor(s) and d.kind(s) != "open_to_below"]
+    level = [s for s in indoor if d.floor(s) == door_floor]  # a stair's door: its own landing
+    indoor = level or indoor
+    floor_top = max((d.floor_elevation(s) for s in indoor), default=0.0)
     notes = o.get("notes") or ""
+    if o.get("head_height"):
+        return floor_top + float(o["head_height"])
     m = _HEADER_RE.search(notes)
     if m:
-        return float(m.group(1) or m.group(2))
+        return floor_top + float(m.group(1) or m.group(2))
     full = (
         category in ("well_edge", "open_stair")
         or o.get("kind") in ("step", "ramp")
-        or _FULL_HEIGHT_RE.search(notes)
+        or (o.get("kind") not in DOOR_KINDS and _FULL_HEIGHT_RE.search(notes))
     )
-    if not full:
-        return DEFAULT_DOOR_HEIGHT_M
-    sides = [d.height(s) for s in (o["a"], o["b"]) if d.indoor(s) and d.kind(s) != "open_to_below"]
-    return min(sides) if sides else DEFAULT_DOOR_HEIGHT_M
+    if full and indoor:
+        return min(d.floor_elevation(s) + d.height(s) for s in indoor)
+    return floor_top + DEFAULT_DOOR_HEIGHT_M
 
 
 def _clip_height(height: float, bottom: float, rooms: list[Room], elev: dict[int, float]) -> float:
@@ -443,17 +435,6 @@ def _clip_height(height: float, bottom: float, rooms: list[Room], elev: dict[int
     tops = [elev.get(r.floor, 0.0) + r.ceiling_height_m - bottom for r in rooms]
     limit = min(tops) if tops else height
     return min(height, limit) if limit >= MIN_DOOR_HEIGHT_M else height
-
-
-def _stair_run(o: dict) -> float:
-    if o.get("length"):
-        return float(o["length"])
-    return abs(float(o.get("rise") or 0.0)) / RISER_M * TREAD_M
-
-
-def _position(o: dict) -> Point | None:
-    p = o.get("position")
-    return (float(p[0]), float(p[1])) if p else None
 
 
 def _shaft(
@@ -464,8 +445,8 @@ def _shaft(
     f_lo, f_hi = d.floor(lo), d.floor(hi)
     elev = d.elevation_of_floor
     width = float(o.get("clear_width") or 0.9)
-    area = max(width * max(_stair_run(o), 1.0), 1.0)
-    pos = _position(o)
+    area = max(width * max(stair_run(o), 1.0), 1.0)
+    pos = position(o)
     half = math.sqrt(area) / 2.0
     shaft = Room(
         id=f"shaft:{oid}",
@@ -510,7 +491,9 @@ def _direct_door(
         ends.reverse()
     floor = _door_floor(d, o, room_of, merged)
     bottom = d.elevation_of_floor.get(floor, 0.0)
-    height = _door_height(d, o, state["category"])
+    # engine.fire puts a door's bottom at its storey's elevation, so a raised floor (150 at
+    # +0.70) goes into the height: the top lands where the real header is.
+    height = max(_door_top(d, o, state["category"], floor) - bottom, MIN_DOOR_HEIGHT_M)
     joined = [rooms[e] for e in ends if e != OUTSIDE]
     return Door(
         id=o["id"],
@@ -522,134 +505,8 @@ def _direct_door(
         fire_rating_min=state["fire_rating_min"],
         height_m=_clip_height(height, bottom, joined, d.elevation_of_floor),
         name=f"{o.get('kind', 'door')} {d.label(o['a'])} / {d.label(o['b'])}",
-        position=_position(o),
+        position=position(o),
     )
-
-
-# --- Routing graph. ---
-@dataclass(frozen=True)
-class Node:
-    id: str
-    name: str
-    kind: str
-    storey: str | None
-    is_outdoor: bool
-    point: Point | None  # representative point inside the polygon; None for SAFE
-    elevation: float
-    occupant_load: int
-
-
-@dataclass(frozen=True)
-class Arc:
-    """One walkable opening, in one direction: frm's point -> opening -> to's point."""
-
-    opening: str
-    frm: str
-    to: str
-    kind: str
-    t_in_s: float  # frm's point to the opening
-    t_out_s: float  # opening to to's point (0 when `to` is SAFE)
-    d_in_m: float  # walking distance (slope length on stairs and ramps)
-    d_out_m: float
-    effective_width_m: float
-    is_exit: bool
-    point: tuple[float, float, float]  # opening position [x, z, elevation]
-
-
-@dataclass
-class RouteGraph:
-    nodes: dict[str, Node]
-    arcs: dict[str, list[Arc]]  # outgoing arcs by node id
-    excluded: dict[str, str] = field(default_factory=dict)  # opening id -> why not walkable
-
-    def arc_count(self) -> int:
-        return sum(len(v) for v in self.arcs.values())
-
-
-def _not_walkable(d: _Data, o: dict, state: dict) -> str | None:
-    if state["category"] == "unknown_space":
-        return NOT_A_FIRE_DOOR["unknown_space"]
-    if o.get("kind") == "elevator":
-        return "elevator: not used for egress"
-    if float(o.get("effective_width") or 0.0) <= 0.0:
-        return "effective width 0 (floor void, well edge or shaft): carries smoke, not people"
-    if not state["egress"]:
-        return state["why"]
-    if not _position(o):
-        return "no position"
-    return None
-
-
-def _arc(d: _Data, nodes: dict[str, Node], o: dict, frm: str, to: str) -> Arc:
-    pos = _position(o)
-    d_in = math.dist(nodes[frm].point, pos) if nodes[frm].point else 0.0
-    d_out = math.dist(pos, nodes[to].point) if nodes[to].point else 0.0
-    kind = o.get("kind") or "door"
-    rise = float(o.get("rise") or 0.0)
-    run = slope = 0.0
-    speed = WALK_LEVEL_M_S
-    if kind in ("stair", "step") and rise:
-        run, speed = _stair_run(o), WALK_STAIR_M_S
-    elif kind == "ramp":
-        run, speed = float(o.get("length") or 0.0), WALK_RAMP_M_S
-    if run:
-        slope = math.hypot(run, rise)
-    # The stair or ramp run is centred on the opening position; the rest is level walking.
-    level_in = max(0.0, d_in - run / 2.0)
-    level_out = max(0.0, d_out - run / 2.0) if nodes[to].point else 0.0
-    sides = [s for s in (frm, to) if s != SAFE]
-    elevation = sum(nodes[s].elevation for s in sides) / len(sides)
-    return Arc(
-        opening=o["id"],
-        frm=frm,
-        to=to,
-        kind=kind,
-        t_in_s=level_in / WALK_LEVEL_M_S + slope / 2.0 / speed,
-        t_out_s=level_out / WALK_LEVEL_M_S + slope / 2.0 / speed,
-        d_in_m=level_in + slope / 2.0,
-        d_out_m=level_out + slope / 2.0,
-        effective_width_m=float(o.get("effective_width") or 0.0),
-        is_exit=bool(o.get("is_exit")),
-        point=(pos[0], pos[1], round(elevation, 3)),
-    )
-
-
-def _build_graph(d: _Data, states: dict[str, dict]) -> RouteGraph:
-    nodes: dict[str, Node] = {}
-    for sid, s in d.spaces.items():
-        poly = d.polygon(sid)
-        if len(poly) >= 3:
-            point = representative_point(poly)
-        else:  # no polygon: the mean of its openings' positions
-            ps = [_position(o) for o in d.openings.values() if sid in (o.get("a"), o.get("b"))]
-            ps = [p for p in ps if p]
-            point = (
-                (sum(p[0] for p in ps) / len(ps), sum(p[1] for p in ps) / len(ps))
-                if ps
-                else (0.0, 0.0)
-            )
-        nodes[sid] = Node(
-            id=sid,
-            name=d.label(sid),
-            kind=d.kind(sid),
-            storey=s.get("storey"),
-            is_outdoor=bool(s.get("is_outdoor")),
-            point=point,
-            elevation=d.floor_elevation(sid),
-            occupant_load=int(s.get("occupant_load") or 0),
-        )
-    nodes[SAFE] = Node(SAFE, d.label(SAFE), "safe", None, True, None, 0.0, 0)
-    arcs: dict[str, list[Arc]] = {nid: [] for nid in nodes}
-    excluded: dict[str, str] = {}
-    for oid, o in d.openings.items():
-        why = _not_walkable(d, o, states[oid])
-        if why:
-            excluded[oid] = why
-            continue
-        for frm, to in ((o["a"], o["b"]), (o["b"], o["a"])):
-            if frm != SAFE:  # nobody walks back in from the public way
-                arcs[frm].append(_arc(d, nodes, o, frm, to))
-    return RouteGraph(nodes=nodes, arcs=arcs, excluded=excluded)
 
 
 # --- The adapted venue. ---
@@ -688,6 +545,10 @@ class AriaVenue:
             indoor = ", ".join(sorted(self.room_of))
             raise ValueError(f"{space_id!r} is not an indoor space. Indoor ids: {indoor}")
         return self.room_of[space_id]
+
+    def height(self, space_id: str) -> float:
+        """Floor-to-ceiling height of a space (3.0 m when venue.json has none)."""
+        return self._data.height(space_id)
 
     def floor_offset(self, space_id: str) -> float:
         """Space floor minus its fire room's floor (nonzero for the Galleria's raised far end)."""
@@ -742,8 +603,8 @@ def load_aria_venue(
                 area_m2=d.area(sid),
                 ceiling_height_m=d.height(sid),
                 fuel_class=_fuel_class(d, sid),
-                perimeter_m=_perimeter(poly) or None,
-                footprint=_bbox([poly]),
+                perimeter_m=perimeter(poly) or None,
+                footprint=bbox([poly]),
             )
     for room in rooms.values():
         if room.fuel_class not in FUEL_CLASSES:
@@ -751,10 +612,13 @@ def load_aria_venue(
 
     origin_room = None
     if origin_space is not None:
-        if origin_space not in room_of and origin_space not in rooms:
-            indoor = ", ".join(sorted(room_of))
-            raise ValueError(f"{origin_space!r} is not an indoor space. Indoor ids: {indoor}")
-        origin_room = room_of.get(origin_space, origin_space)
+        if origin_space not in room_of or d.kind(origin_space) in NON_WALKING_KINDS:
+            starts = ", ".join(sorted(s for s in room_of if d.kind(s) not in NON_WALKING_KINDS))
+            raise ValueError(
+                f"a fire can't start in {origin_space!r} (not an indoor space, or a skylight well "
+                f"or elevator car). Start ids: {starts}"
+            )
+        origin_room = room_of[origin_space]
     states = _door_states(d, room_of, origin_room, open_origin_doors, overrides)
 
     doors: dict[str, Door] = {}
@@ -815,7 +679,7 @@ def load_aria_venue(
     return AriaVenue(
         raw=raw,
         fire=fire_venue,
-        graph=_build_graph(d, states),
+        graph=build_route_graph(d, states),
         room_of=room_of,
         spaces_of=spaces_of,
         doors_of_opening=doors_of_opening,

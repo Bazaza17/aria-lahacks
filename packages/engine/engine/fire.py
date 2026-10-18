@@ -111,10 +111,18 @@ def _round(v: float | None) -> int | None:
 
 
 class _Sim:
-    def __init__(self, venue: Venue, horizon_s: float, frame_step_s: float = 0.0):
+    def __init__(
+        self,
+        venue: Venue,
+        horizon_s: float,
+        frame_step_s: float = 0.0,
+        flashover_layer_k: float | None = None,
+    ):
         self.v = venue
         self.horizon = horizon_s
         self.frame_step = frame_step_s
+        # Optional second flashover criterion: upper layer at or above this temperature.
+        self.flashover_layer_k = flashover_layer_k
         self.frames: list[dict] = []
         self.state = {rid: _RoomState() for rid in venue.rooms}
         self.door_failed_s: dict[str, float] = {}
@@ -245,7 +253,8 @@ class _Sim:
             st.peak_kw = max(st.peak_kw, q)
             st.fire.energy_kj += q * dt
             q_fo, _ = self.flashover_kw(room, t)
-            if st.flashover_s is None and q > 0 and q >= q_fo:
+            hot = self.flashover_layer_k is not None and st.temp_k >= self.flashover_layer_k
+            if st.flashover_s is None and q > 0 and (q >= q_fo or hot):
                 self.on_flashover(rid, t)
             if st.flashover_s is not None and not st.fire.out:
                 # Fully developed: the whole room is hot gas.
@@ -359,12 +368,16 @@ def simulate(
     growth: str = "fast",
     horizon_s: float = 900.0,
     frame_step_s: float = 10.0,
+    flashover_layer_c: float | None = None,
 ) -> Timeline:
+    """flashover_layer_c (default None: Thomas only): also flash a burning room over once its
+    upper layer reaches this temperature (600 °C is the usual zone-model criterion)."""
     if start_room not in venue.rooms:
         raise ValueError(f"unknown start room {start_room!r}; rooms: {sorted(venue.rooms)}")
     if growth not in ALPHA_KW_S2:
         raise ValueError(f"unknown growth {growth!r}; use one of {sorted(ALPHA_KW_S2)}")
-    sim = _Sim(venue, horizon_s, frame_step_s)
+    layer_k = None if flashover_layer_c is None else flashover_layer_c + 273.15
+    sim = _Sim(venue, horizon_s, frame_step_s, layer_k)
     sim.ignite(start_room, 0.0, growth, None)
     sim.run()
 
