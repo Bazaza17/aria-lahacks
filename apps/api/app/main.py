@@ -18,7 +18,7 @@ from app.brand import PRODUCT_NAME
 from app.creao.mcp import mount as creao_mcp
 from app.creao.runtime import lifespan as creao_lifespan
 from app.ratelimit import limiter
-from app.routes import agent, live
+from app.routes import agent, engine, live
 
 # --- Sentry --------------------------------------------------------------
 # Off unless SENTRY_DSN is set. FastAPI/Starlette and Anthropic integrations
@@ -68,6 +68,7 @@ app.add_middleware(
 
 app.include_router(agent.router)
 app.include_router(live.router)  # the CREAO layer: live incidents, exit tracking, command staff
+app.include_router(engine.router)  # the building engine (packages/engine), run on demand
 
 
 @app.get("/")

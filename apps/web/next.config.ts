@@ -13,8 +13,12 @@ const nextConfig: NextConfig = {
   compress: false,
   // The live dispatch console (apps/api/app/creao/view.html) and every /live/* call it makes
   // go through this app, so the whole demo is one address (localhost:3000/live/view).
+  // The building engine runs in the API too (/engine/viewer?start=…).
   async rewrites() {
-    return [{ source: "/live/:path*", destination: `${API_ORIGIN}/live/:path*` }];
+    return [
+      { source: "/live/:path*", destination: `${API_ORIGIN}/live/:path*` },
+      { source: "/engine/:path*", destination: `${API_ORIGIN}/engine/:path*` },
+    ];
   },
 };
 

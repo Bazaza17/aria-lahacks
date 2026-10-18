@@ -25,11 +25,14 @@ import {
   formatClock,
   frameAt,
   latestEvent,
+  loadFireStarts,
   loadFireTimeline,
+  type FireStarts,
   type FireTimeline,
 } from "@/lib/scan-fire";
 import { loadPlaceIndex, searchPlaces, type PlaceIndex } from "@/lib/scan-places";
 
+import { FireStartPicker } from "./FireStartPicker";
 import { HazardPinFilter } from "./HazardPinFilter";
 import { PlaceSearch, type PlaceFound } from "./PlaceSearch";
 import { ScanViewToolbar } from "./ScanViewToolbar";
@@ -121,6 +124,10 @@ export function BuildingScan({
   const { report, running } = useAgentRun();
   const { surge, fireTime } = useScenario();
   const [fireTimeline, setFireTimeline] = useState<FireTimeline | null>(null);
+  const [fireStarts, setFireStarts] = useState<FireStarts | null>(null);
+  const [fireStart, setFireStart] = useState<string | null>(null);
+  const [fireBusy, setFireBusy] = useState(false);
+  const [fireFailed, setFireFailed] = useState(false);
   const [placeIndex, setPlaceIndex] = useState<PlaceIndex | null>(null);
   const [placeFound, setPlaceFound] = useState<PlaceFound | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -155,14 +162,29 @@ export function BuildingScan({
 
   useEffect(() => {
     let cancelled = false;
-    setFireTimeline(null);
-    void loadFireTimeline(buildingId).then((t) => {
-      if (!cancelled) setFireTimeline(t);
+    void loadFireStarts(buildingId).then((s) => {
+      if (!cancelled) setFireStarts(s);
     });
     return () => {
       cancelled = true;
     };
   }, [buildingId]);
+
+  // The engine's run for the chosen start (the API's default until one is picked). The last
+  // timeline stays on screen while a new start runs.
+  useEffect(() => {
+    let cancelled = false;
+    setFireBusy(true);
+    void loadFireTimeline(buildingId, fireStart ?? undefined).then((t) => {
+      if (cancelled) return;
+      if (t) setFireTimeline(t);
+      setFireFailed(!t);
+      setFireBusy(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [buildingId, fireStart]);
 
   useEffect(() => {
     let cancelled = false;
@@ -606,6 +628,15 @@ export function BuildingScan({
             evacOpenCount={evacOpen}
             evacTotal={evacTotal}
           >
+            {fireStarts && (
+              <FireStartPicker
+                starts={fireStarts.starts}
+                value={fireStart ?? fireTimeline?.start_room ?? fireStarts.default}
+                busy={fireBusy}
+                failed={fireFailed}
+                onChange={setFireStart}
+              />
+            )}
             {placeIndex && (
               <PlaceSearch found={placeFound} onSearch={findPlace} onClear={handlePlaceClear} />
             )}
