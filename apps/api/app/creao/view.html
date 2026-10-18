@@ -144,6 +144,18 @@
   #login { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 20; }
   #login form { width: 360px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
   #login input { background: #000; border: 1px solid var(--line-2); border-radius: 6px; padding: 9px 11px; }
+  /* declare a drill (origin from the engine's start spaces) / end the active evacuation */
+  .ctl { display: flex; align-items: center; gap: 8px; }
+  .ctl select { background: #000; border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 8px; font-size: 12px; max-width: 220px; }
+  .ctl .btn { padding: 6px 10px; }
+  .ctl .btn.end { border-color: rgba(239,68,68,.6); color: #fca5a5; }
+  /* the engine's fire model (simulation): origin, exits lost and when, people at risk */
+  #fireline { display: none; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 10px 24px; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 12.5px; color: var(--soft); }
+  #fireline.on { display: flex; }
+  #fireline .tag { font-family: "Geist Mono"; font-size: 10px; letter-spacing: .2em; color: var(--p3); }
+  #fireline .x { font-size: 12px; color: var(--muted); } #fireline .x.gone { color: #fca5a5; }
+  #fireline .x b { font-family: "Geist Mono"; font-weight: 600; margin-left: 4px; }
+  #fireline .risk { margin-left: auto; color: var(--muted); }
   @media (max-width: 1100px) {
     main { grid-template-columns: 1fr; height: auto; } .col.map { border-right: 0; }
     #plan { flex: none; height: 70vh; } .scroll { overflow: visible; } .log { max-height: none; }
@@ -160,6 +172,7 @@
     <span id="sub" class="sub"></span>
   </div>
   <div class="right">
+    <span class="ctl" id="ctl"></span>
     <span class="tally" id="tally"></span>
     <span id="conn" class="conn"><i></i><span id="connText">CONNECTING</span></span>
   </div>
@@ -169,6 +182,7 @@
     <div class="agents"><span class="caps" style="color:rgba(255,255,255,.4)">CREAO</span><span class="dots" id="agentDots"></span>
       <span class="now" id="agentNow">Waiting for the command staff</span><button id="agentToggle" aria-expanded="false">6 agents · details</button></div>
     <div id="staff"></div>
+    <div id="fireline" aria-live="polite"></div>
     <div class="floorbar"><div style="display:flex;gap:10px;align-items:center"><div class="tabs" id="tabs"></div><span class="scanbadge" id="scanBadge"></span></div><span class="hint">Hover a person for their exit · click a pin for the report · drag to orbit</span></div>
     <div id="plan"><div id="scene"></div><div class="noscan" id="noScan"></div><div id="hover"></div></div>
     <div class="legend">
@@ -346,6 +360,66 @@ function renderAgents() {
   $("staff").innerHTML = roles.map((r) => `<div class="agent ${r.deployed ? r.status : ""}"><span class="dot"></span><div style="min-width:0"><div class="name">${esc(r.title)}</div><div class="task">${esc(r.last_summary || r.last_task || r.does)}</div></div></div>`).join("");
 }
 
+// ------------------------------------------------------------------ declare / end (dispatcher)
+// Origins are the engine's start spaces (GET /engine/starts); the API runs the engine for the
+// drill and the fire model, exits lost and routes all come from it. Growth is fixed at fast.
+let starts = null, ctlFor = null;
+async function loadStarts() {
+  if (starts) return starts;
+  try {
+    const r = await fetch("/engine/starts"); if (!r.ok) throw new Error(r.status);
+    const j = await r.json();
+    // rooms people were in, named like the map (the profile's zones), by floor
+    const zoneOf = (id) => S.profile?.zones?.find((z) => z.spaces.includes(id));
+    const list = j.starts.filter((x) => x.occupant_load > 0).map((x) => ({ ...x, label: `${shortLabel(zoneOf(x.id)?.label || x.name)} · ${x.id}` }));
+    starts = { def: j.default, list: list.sort((a, b) => (a.storey + a.label).localeCompare(b.storey + b.label)) };
+  } catch (e) { console.warn("engine starts", e); starts = { def: null, list: [] }; }
+  return starts;
+}
+async function renderCtl() {
+  const ev = S.s?.evacuation, key = ev ? `ev:${ev.id}` : "idle";
+  if (ctlFor === key) return; ctlFor = key;
+  if (ev) { $("ctl").innerHTML = `<button class="btn end" onclick="endEvacuation(this)">End ${esc(ev.mode)}</button>`; return; }
+  const st = await loadStarts();
+  if (S.s?.evacuation) return;  // declared while we waited
+  const floors = [...new Set(st.list.map((x) => x.storey))];
+  const opts = floors.map((f) => `<optgroup label="${f === "1F" ? "Floor 1" : `Floor ${esc(f.replace("F", ""))} (floor plan)`}">${st.list.filter((x) => x.storey === f)
+    .map((x) => `<option value="${esc(x.id)}" ${x.id === st.def ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</optgroup>`).join("");
+  $("ctl").innerHTML = st.list.length
+    ? `<select id="origin" aria-label="Fire origin">${opts}</select><button class="btn solid" onclick="declareDrill(this)">Declare drill</button>`
+    : `<button class="btn solid" onclick="declareDrill(this)">Declare drill</button>`;
+}
+async function declareDrill(btn) {
+  const origin = $("origin")?.value || null;
+  const name = ($("origin")?.selectedOptions?.[0]?.textContent || "the building").split(" · ")[0];
+  if (!confirm(`Declare a DRILL with the fire starting in ${name}? Everyone registered in the building gets the drill alert.`)) return;
+  btn.disabled = true; btn.textContent = "Running the engine…";
+  try {
+    await api(`/live/buildings/${S.b}/evacuations`, { method: "POST", body: JSON.stringify({ mode: "drill", origin, growth: "fast", dispatcher: S.me, description: `Drill: fire in ${name}` }) });
+  } catch (e) { alert(e.message); }
+  finally { ctlFor = null; refresh(); }
+}
+async function endEvacuation(btn) {
+  const ev = S.s?.evacuation; if (!ev) return;
+  if (!confirm(`End the ${ev.mode}?`)) return;
+  btn.disabled = true;
+  try { await api(`/live/evacuations/${ev.id}/end`, { method: "POST", body: "{}" }); } catch (e) { alert(e.message); }
+  finally { ctlFor = null; refresh(); }
+}
+const mmss = (min) => { const t = Math.round(min * 60); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
+function renderFireline() {
+  const fm = S.s?.fire_model, sm = fm?.summary, el = $("fireline");
+  if (!S.s?.evacuation || !fm) { el.classList.remove("on"); el.innerHTML = ""; return; }
+  const now = S.s.evacuation.minute_now || 0;
+  const lost = (sm?.exits_lost || []).slice(0, 6).map((x) => `<span class="x ${x.minute <= now ? "gone" : ""}" title="${esc(x.label)}">${esc(shortLabel(x.label))}<b>${mmss(x.minute)}</b></span>`).join("");
+  const risk = sm ? `${sm.at_risk_leaving_now ?? "–"} of ${sm.occupants} at risk leaving now${sm.last_out_min != null ? ` · last out ${mmss(sm.last_out_min)}` : ""} · ${sm.at_risk_obvious_route ?? "–"} by the obvious way` : "";
+  el.innerHTML = `<span class="tag">${fm.source === "aria-engine" ? "ENGINE · SIMULATION" : "FIRE MODEL · " + esc((fm.source || "manual").toUpperCase())}</span>
+    <span>Fire starts in <b>${esc(fm.origin?.label || S.origin || "?")}</b>${sm?.growth ? ` · ${esc(sm.growth)} growth` : ""}</span>
+    ${lost ? `<span class="x">Exits lost:</span>${lost}` : ""}<span class="risk">${esc(risk)}</span>`;
+  el.title = sm?.text || ""; el.classList.add("on");
+}
+Object.assign(window, { declareDrill, endEvacuation });
+
 // ------------------------------------------------------------------ render
 // The map: the 3D scan with the live markers over it
 function drawPlace() { window.Scene3D?.update(); }
@@ -357,7 +431,7 @@ function render() {
     .map(([k, l, c]) => `<span><b style="color:${c}">${rc[k] || 0}</b>${l}</span>`).join("");
   const onFloor = (lv) => s.people.filter((x) => x.anchor && x.status !== "confirmed_safe" && floorOf(x.anchor) === lv).length;
   document.querySelectorAll("#tabs button").forEach((b) => { const lv = +b.dataset.f, n = onFloor(lv); b.textContent = `${b.dataset.label}${n ? " · " + n : ""}`; });
-  renderAgents(); renderQueue(); markQueueSeen(); renderComms(); renderLog(); drawPlace();
+  renderAgents(); renderQueue(); markQueueSeen(); renderComms(); renderLog(); renderFireline(); renderCtl(); drawPlace();
 }
 
 // ------------------------------------------------------------------ actions
@@ -418,13 +492,13 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (S.op
 setInterval(() => {
   if (!S.started) { $("sub").textContent = ""; return; }
   const s = Math.max(0, (Date.now() - S.started) / 1000);
-  $("sub").textContent = `Fire in the ${S.origin} · ${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")} since declared`;
+  $("sub").textContent = `Fire in ${S.origin} · ${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")} since declared`;
 }, 1000);
 setInterval(() => { if (S.s) { renderQueue(); markQueueSeen(); } }, 5000);  // keeps the auto-call countdown moving
 
 // ------------------------------------------------------------------ start
 async function selectBuilding(id) {
-  S.b = id; S.seen = new Set(); S.drawn = new Set(); S.open = null; $("drawer").classList.remove("open");
+  S.b = id; S.seen = new Set(); S.drawn = new Set(); S.open = null; ctlFor = null; starts = null; $("drawer").classList.remove("open");
   S.profile = await api(`/live/buildings/${id}`);
   window.Scene3D?.setBuilding?.();
   const levels = S.profile.floors.map((f) => f.level); if (!levels.includes(S.floor)) S.floor = levels[0];
@@ -541,12 +615,19 @@ async function loadScan() {
       g.position.set(src.x || 0, src.y || 0, src.z || 0);
       scanGroup.add(g); g.updateMatrixWorld(true);
       scanBox = new THREE.Box3().setFromObject(g); ground.visible = false; fitCamera();
-      badge.textContent = `SCAN · ${src.file || "scan_url"}`; return;
+      scanName = `SCAN · ${src.file || "scan_url"}`; planBadge(); return;
     } catch (e) { /* not there: try the next file */ }
   }
   note.innerHTML = "<b>3D scan not loaded.</b> It isn't on GitHub yet: put <b>venue_4rooms_web.glb</b> in apps/web/public/scans/ (or set the venue's scan_url) and it appears here under the markers.";
 }
 
+let scanName = "";
+function planBadge() {  // floor 2 and up are drawn from the floor plan; the scan covers floor 1
+  const f = S.profile?.floors?.find((x) => x.level === S.floor);
+  const badge = document.getElementById("scanBadge");
+  badge.textContent = S.floor > 1 ? `FLOOR PLAN ONLY · NOT SCANNED` : scanName;
+  badge.title = f?.source ? `Floor ${S.floor}: ${f.source}` : "";
+}
 const COLOR = { open: 0x22c55e, predicted: 0xf5b800, bad: 0xef4444 };
 function update() {
   if (!renderer || !S.profile?.frame) return;
@@ -559,9 +640,11 @@ function update() {
   const onFloor = (a) => a && floorOf(a) === fl;
   // fire model (simulation)
   const now = s.evacuation?.minute_now ?? 0;
-  for (const st of (s.fire_model?.steps || []).filter((x) => x.minute <= now + 0.01 && onFloor(x.anchor))) {
-    const c = world(st.anchor, 0.06);
-    const glow = new THREE.Mesh(new THREE.CircleGeometry(5, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.18, depthWrite: false }));
+  const shown = new Map();  // the latest state per zone reached so far
+  for (const st of (s.fire_model?.steps || []).filter((x) => x.minute <= now + 0.01 && x.place_kind !== "exit" && onFloor(x.anchor))) shown.set(st.place, st);
+  for (const st of shown.values()) {
+    const c = world(st.anchor, 0.06), smoke = st.kind === "smoke";
+    const glow = new THREE.Mesh(new THREE.CircleGeometry(smoke ? 4 : 5, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: smoke ? 0x9ca3af : 0xef4444, transparent: true, opacity: smoke ? 0.16 : 0.2, depthWrite: false }));
     glow.position.copy(c); liveGroup.add(glow);
     liveGroup.add(label(esc(st.kind.toUpperCase()), "fire", c.clone().add(new THREE.Vector3(0, 0.5, 0))));
   }
@@ -617,7 +700,7 @@ function update() {
 window.Scene3D = {
   ok: !!renderer, update,
   setBuilding() { scanFor = null; fitted = false; },
-  floorChanged() { fitted = false; },
+  floorChanged() { fitted = false; planBadge(); },
   debug: () => ({ cam: camera.position.toArray().map((v) => +v.toFixed(1)), target: controls.target.toArray().map((v) => +v.toFixed(1)),
     box: scanBox && [scanBox.min.toArray().map((v) => +v.toFixed(1)), scanBox.max.toArray().map((v) => +v.toFixed(1))] }),
 };

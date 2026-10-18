@@ -15,6 +15,21 @@ Aayush's piece of Aria. While a fire (or a labeled drill) is happening:
 4. **The dispatcher decides.** Route changes pass the safety rules, then wait for a dispatcher's
    approval before anyone is texted. Life-threat words put a human on the call, with a brief.
 
+It runs on the same building and the same fire as the pre-plan:
+
+- **One venue model.** `apps/api/app/creao/buildings/james_west.json` is generated from the
+  engine's `packages/engine/venue.json` by `scripts/build_profile.py` (`cd apps/api && uv run
+  python scripts/build_profile.py`; never edit the JSON by hand). Zones are venue spaces (grouped
+  under the event map's names, with their venue space ids), exits are all 14 venue exits plus the
+  stairs down from floor 2, and occupant numbers come from venue.json's default `2F_indoor`
+  scenario. Floor 2 comes from the floor plan, not the scan, and is labelled that way. There is
+  no assembly point: people are told to go outside, away from the building, where staff direct
+  them.
+- **The engine's fire.** Declaring a drill or fire with an `origin` runs Aria's building engine
+  (`app.routes.engine.run`) for that start space: the fire model's steps (smoke and untenable
+  times per zone, exit lost times), its summary (exits lost, people at risk, last out) and each
+  zone's route all come from the engine (`app/creao/engine_model.py`).
+
 ```
 caller/texter ─ Photon + ElevenLabs (Sai) ─> POST /live/intake/events ─> TigerData
                                                                            │ pg_notify on insert
@@ -40,9 +55,14 @@ docker exec tiger-local psql -U postgres -c "CREATE DATABASE aria_live"
 uv run python scripts/creao_standin.py --print-env >> .env   # rehearse the CREAO staff without CREAO
 uv run uvicorn app.main:app --port 8000 --timeout-graceful-shutdown 5   # open SSE streams otherwise block shutdown
 uv run python scripts/creao_standin.py                      # second terminal: scripted CREAO agents (no AI)
-uv run python scripts/live_feed.py --approve                # third terminal: a drill, as Sai's pipeline sends it
+uv run python scripts/live_feed.py --approve                # third terminal: a scripted drill (localhost only)
 curl -N "http://localhost:8000/live/stream?building_id=547b5ec5-30c5-4f76-8080-012a52e90bd9"
 ```
+
+`live_feed.py` declares its drill with an origin (`--origin galleria` by default, or any id
+from `GET /engine/starts`), so the fire model and routes come from the engine. Its people are fake
+(+1555500xxxx) and every event it posts is tagged `source: "simulated"`. It refuses a non-localhost
+`--base` unless `--allow-remote` is passed: a deployed API has the real database and messenger.
 
 `GET /live/health` shows the database (TimescaleDB, hypertables, triggers, aggregate), whether the
 TigerData LISTEN is connected, and which CREAO agents are configured. On the laptop with no keys
@@ -69,30 +89,44 @@ What it does:
   `reply.answer` is sent word for word, with the approved route. "2" also gets a guiding ElevenLabs
   call. Anything else goes to the ElevenLabs agent, with the approved route as its context (and as
   the fallback text if the agent fails). Every text sent becomes `sms.sent`, tagged `by` agent, aria
-  or dispatcher.
+  or dispatcher. Someone who texts for the first time during an evacuation is counted as alerted
+  and `reply.answer` carries the current instruction (`reply.first_contact` is true).
 - **Calls:** ElevenLabs carries them. `call.started`, then the transcript lines as the call goes
   (polled from ElevenLabs), `call.transferred` when the agent hands the call to the dispatcher
   (its `transfer_to_number` tool, on a trigger word such as "trapped" or "can't breathe"), then
   `call.ended` with ElevenLabs' termination reason.
 - **From the live stream:** `occupant.message` texts one person (the alert, an approved route
   change, or a dispatcher's re-send; one event per person, so a full venue never overflows a
-  notification); `occupant.call_requested` places the ElevenLabs call; `handoff.joined` tells the
-  person a dispatcher is taking over.
+  notification). Each carries `by` (`aria` or `dispatcher`, with the dispatcher's initials in
+  `dispatcher`), `drill` (true unless the evacuation is live), `name` when known and `reason`
+  (`alert`, `route_change`, `retext`). `occupant.call_requested` places the ElevenLabs call;
+  `handoff.joined` tells the person a dispatcher is taking over.
+- **The building brief:** `GET /live/buildings/{id}/brief` (`X-Tool-Secret` or the dispatcher key)
+  returns `{building, text, exits: [{id, label, floor}], stairs, assembly, updated_at}`: plain-text
+  layout facts for the phone agent (floors and rooms with the event's names, every exterior exit,
+  the stairs down, "elevators are not used in an evacuation", where to go once out), built from
+  the generated profile. It claims no assembly point, refuge area or step-free route.
 - **TigerData:** every text and call line, in and out, lands in the `comms_events` hypertable
   (with the reply intent and any trigger word) and the `comms_1m` continuous aggregate.
 
 What people are told comes from the API and depends on who they are:
 
-- **Unknown position:** every approved exit, and a request to say where they are.
-- **Their zone's approved exit is fine:** that exit.
+- **Unknown position:** the approved exits (only floor 2's stairs when they said "upstairs",
+  "networking" or "workshops"), and a request to say where they are. A floor said outright
+  ("second floor", "upstairs") beats a generic place on another floor: "second floor hallway"
+  or "upstairs bathroom" is an unknown position on floor 2, not the Galleria or the ground-floor
+  restrooms. "Entrance" and "front entrance" mean outside at check-in; "main entrance" and
+  "front doors" name the doors.
+- **Their zone's approved exit is fine:** that exit; on floor 2, the stair down and then the door
+  the engine's route leaves by.
 - **Their exit was just reported unsafe** (route change waiting for the dispatcher): avoid it, and
   use the other approved exits.
 - **They asked for help:** help is coming, stay put if it's safe.
-- **They're marked safe:** stay at the assembly point.
+- **They're marked safe:** stay outside, away from the building, where staff direct them.
 
-The James West profile mirrors `apps/messenger/src/venue.ts` (sample data): same exits, same
-assembly point. Its scan anchors are placeholders until the scan is calibrated. When `venue.ts`
-changes, update `james_west.json` to match.
+The James West profile is generated from `packages/engine/venue.json`; when the venue model
+changes, run `scripts/build_profile.py` again. The messenger reads the same facts through the
+brief.
 
 The envelope, for anything else that wants to post events (`X-Tool-Secret`):
 
@@ -101,7 +135,7 @@ POST /live/intake/events
 {"eventId": "evt_1042",            // unique; a retry with the same id is acknowledged, never applied twice
  "eventType": "sms.received",      // sms.received | sms.sent | location.updated | occupant.status
                                    // | call.started | call.transcript | call.details | call.ended
- "source": "photon",
+ "source": "photon",                // "simulated" for scripted events (live_feed.py)
  "payload": {"buildingId": "547b5ec5-…", "phone": "+15553000020", "text": "rear door is jammed",
              "conversationId": "conv_…", "role": "user", "lat": 34.07, "lng": -118.44, "accuracyMeters": 8}}
 ```
@@ -118,21 +152,40 @@ Header `Authorization: Bearer <DISPATCH_API_KEYS entry>` (`?token=` for SSE).
 | `GET /live/buildings/{id}/report` (`.md`) | the live incident report, each section signed by its CREAO agent |
 | `GET /live/buildings/{id}/staff` | the CREAO org chart: each agent's status and last task, handoffs, activity |
 | `GET /live/incidents/{id}/report` | what opens when a pin is clicked: the incident, the person, the handoff brief, CREAO notes and actions on it, the signed report sections, the TigerData timeline |
-| `GET /live/view` | a working reference UI (venue layout with pins, hover card, CREAO report drawer); design in Paper: "Dispatch Console" → page "Aria Live — incident map" |
-| `POST /live/buildings/{id}/evacuations`, `POST /live/evacuations/{id}/end` | declare / end a fire or drill |
+| `GET /live/view` | the dispatch console: the scan with pins, exits and people, the CREAO report drawer, **Declare drill** (origin picked from `GET /engine/starts`, fast growth) and **End**, and the engine's fire summary (origin, exits lost and when, at risk) under the header |
+| `GET /live/buildings/{id}/brief` | plain-text layout facts for the phone agent (see the messenger section) |
+| `POST /live/buildings/{id}/evacuations`, `POST /live/evacuations/{id}/end` | declare / end a fire or drill: `{"mode": "drill", "origin": "140", "growth": "fast", "dispatcher": "AP"}` (origin: a venue space id or a place name) |
 | `GET /live/buildings/{id}/route-proposals`, `POST /live/route-proposals/{id}/decision` | approve / reject (409 + `replacement` if stale) |
 | `POST /live/buildings/{id}/hazards`, `/live/hazards/{id}/verify`, `/clear` | dispatcher hazards |
 | `POST /live/incidents/{id}/acknowledge`, `/assign`, `/handoff/join`, `/handoff/resolve` | incident actions |
 | `POST /live/occupants/{id}/retext`, `/call` | from the dispatcher's queue: re-send someone their approved route (`occupant.message`), or call them now (`occupant.call_requested`) |
 
-Anchors are Aria's scan coordinates (`apps/web/lib/scan-coords.ts`), so pins line up with the viewer.
+Anchors are normalized in the profile's `frame` (the venue frame in metres: room 2's scan x, z;
+elevation 0 = lobby 110's floor), taken from venue.json's polygons and opening positions; the
+console maps them back with `world()` and places the scan by its recorded transform, so pins land
+on the rooms they name.
 
 ## For Lincoln: the fire model
 
-`PUT /live/buildings/{id}/fire-model` (or `fire_model` when the drill is declared):
-`{"label": "...", "steps": [{"minute": 0, "place": "loading dock", "kind": "fire"}, ...]}`. Any exit
-the model expects to lose within 5 minutes is unsafe for routing, and zones using it get a route
-proposal. Shown everywhere as a simulation.
+The fire model comes from the engine. Declare with an `origin`, or set it on a running evacuation:
+`PUT /live/buildings/{id}/fire-model` with `{"engine": {"start": "140", "growth": "fast"}}`. The
+API runs the engine (cached per start and growth, about 4 s the first time) and stores:
+
+- `steps`: per zone, when smoke enters and when it becomes untenable (the engine's `fire.spaces`
+  through the zone's venue spaces); per exit, when it is lost (`fire.exits`, or `fire.openings`
+  for the inside stairs). `source: "aria-engine"`, `simulation: true`.
+- `routes`: each zone's engine route (the capacity-aware `predictive` exit of its spaces) at each
+  departure time (0, 1, 2, 3, 4, 5, 7 min). Routing uses the latest departure up to the minutes
+  since the evacuation started; the nearest-safe-exit heuristic is only the fallback for a zone
+  with no engine route, or when someone reports a hazard at the engine's exit. Floor 2 zones get
+  the stair their route goes down, then the door it leaves by.
+- `summary`: exits lost with times, people at risk leaving now vs by the obvious way out, last
+  out, and a sentence the console and the CREAO agents quote.
+
+The API re-checks routes every 10 s while a fire model is active, so as exits are lost the rules
+propose changes for the dispatcher to approve. A hand-typed model still works
+(`{"label", "steps": [{"minute", "place", "kind"}]}`, `source: "manual"`): any exit it expects to
+lose within 5 minutes is unsafe for routing. Shown everywhere as a simulation.
 
 ## CREAO setup
 

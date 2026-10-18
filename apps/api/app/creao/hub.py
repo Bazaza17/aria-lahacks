@@ -77,11 +77,28 @@ async def publish(
         _fanout(message)
 
 
-async def send_texts(building_id: str, recipients: list[dict], reason: str) -> None:
+async def send_texts(
+    building_id: str,
+    recipients: list[dict],
+    reason: str,
+    *,
+    drill: bool = True,
+    by: str = "aria",
+    dispatcher: str | None = None,
+    approved_by: str | None = None,
+) -> None:
     """One occupant.message per person (the messenger texts each). One event per text keeps every
-    payload far under NOTIFY's 8 KB, however many people are in the building."""
+    payload far under NOTIFY's 8 KB, however many people are in the building.
+
+    Each carries "by" ("aria" or "dispatcher", with the dispatcher's initials in "dispatcher"),
+    "drill" (true unless the evacuation is live) and the person's "name" when known."""
     for r in recipients:
-        await publish("occupant.message", building_id=building_id, data={**r, "reason": reason})
+        data = {**r, "reason": reason, "by": by, "drill": drill}
+        if dispatcher:
+            data["dispatcher"] = dispatcher
+        if approved_by:  # a route change a dispatcher approved; Aria's words
+            data["approved_by"] = approved_by
+        await publish("occupant.message", building_id=building_id, data=data)
 
 
 async def _listen_forever(dsn: str) -> None:

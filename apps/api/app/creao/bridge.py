@@ -140,12 +140,25 @@ async def snapshot(session, building_id: str | None) -> dict:
         "fire_model": s["fire_model"]
         and {
             "label": s["fire_model"].get("label"),
+            "source": s["fire_model"].get("source"),
             "simulation": True,
-            "steps": [
-                {k: st[k] for k in ("minute", "label", "kind")} for st in s["fire_model"]["steps"]
-            ],
+            # the engine's own numbers to quote (exits lost with times, at risk, last out)
+            "summary": s["fire_model"].get("summary"),
+            "steps": _snapshot_steps(s["fire_model"]),
         },
     }
+
+
+def _snapshot_steps(fire_model: dict) -> list[dict]:
+    """The steps the agents see. An engine model has a step per zone per stage, so it is cut to
+    the ones that change a route (fire, exit lost, untenable); a hand-typed model goes as is."""
+    steps = [
+        {"minute": st.get("minute"), "label": st.get("label"), "kind": st.get("kind", "fire")}
+        for st in fire_model.get("steps") or []
+    ]
+    if fire_model.get("source") != "aria-engine":
+        return steps
+    return [st for st in steps if st["kind"] in ("fire", "exit lost", "untenable")][:30]
 
 
 async def trigger_role(

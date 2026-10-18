@@ -38,6 +38,17 @@ FLOOR_PATTERNS = [
         re.I,
     ),
 ]
+# A floor said in so many words ("second floor", "level 2", "2nd fl"); a bare "second" or
+# "lobby" is not one, so "give me a second" never moves anyone off their room.
+EXPLICIT_FLOOR = [
+    *FLOOR_PATTERNS[:2],
+    re.compile(
+        r"\b(ground|first|second|third|fourth|fifth|basement)\s*(?:floor|level|story|storey)\b",
+        re.I,
+    ),
+]
+# Floor words that say where, not what: these override a generic place on another floor.
+POSITION_WORDS = {2: ("upstairs", "up stairs")}
 GPS_APPROX_M = 15
 
 
@@ -119,24 +130,71 @@ def match_exit(building: Building, text: str | None) -> str | None:
 
 def _floor_anchor(building: Building, floor: int | None) -> tuple[Anchor, str]:
     f = building.floor(floor) or building.floors[0]
+    if f.anchor:  # the middle of the floor's indoor rooms (from the venue model)
+        return f.anchor.model_copy(), f.label
     return Anchor(nx=0.5, ny=f.ny, nz=0.5), f.label
+
+
+def floor_alias(building: Building, text: str | None) -> int | None:
+    """A floor named by a word that names no single room: "upstairs", "at the workshops"."""
+    if not text:
+        return None
+    hay = _norm(text)
+    for f in building.floors:
+        if any(_norm(a) in hay for a in f.aliases if len(a.strip()) >= 3):
+            return f.level
+    return None
+
+
+def explicit_floor(text: str | None) -> int | None:
+    """A floor the text states outright ("second floor", "upstairs"), or None."""
+    if not text:
+        return None
+    for pattern in EXPLICIT_FLOOR:
+        if m := pattern.search(text):
+            value = m.group(1).lower()
+            return ORDINALS[value] if value in ORDINALS else int(value)
+    hay = _norm(text)
+    for level, words in POSITION_WORDS.items():
+        if any(_norm(w) in hay for w in words):
+            return level
+    return None
 
 
 def from_text(
     building: Building, text: str | None, floor_hint: int | str | None = None
 ) -> Location:
+    if isinstance(floor_hint, str) and floor_hint.strip().isdigit():
+        floor_hint = int(floor_hint.strip())  # agents send "2" as often as 2
     floor = (
         floor_hint
         if isinstance(floor_hint, int)
         else parse_floor(str(floor_hint) if floor_hint else None)
     )
-    floor = floor if floor is not None else parse_floor(text)
+    # only a floor said outright counts: a bare "second" ("give me a second") is not one
+    floor = floor if floor is not None else explicit_floor(text)
     place = match_place(building, text)
+    if floor is None and place is None:
+        floor = floor_alias(building, text)
     if place:
         kind, place_id = place
         item = building.exit(place_id) if kind == "exit" else building.zone(place_id)
         anchor = item.anchor.model_copy()
         item_floor = getattr(item, "floor", None)
+        stated = floor  # the hint, or a floor the text says outright
+        is_stair = kind == "exit" and getattr(item, "kind", None) == "stair"
+        if (
+            stated is not None
+            and item_floor is not None
+            and stated != item_floor
+            and not is_stair
+            and building.floor(stated)
+        ):
+            # "second floor hallway", "upstairs bathroom": the floor is what they know, the
+            # place name matched a room on another floor. Keep the floor, drop the room, so the
+            # unknown-position route sends that floor's stairs.
+            anchor, label = _floor_anchor(building, stated)
+            return Location(anchor=anchor, label=label, source="floor", approx=True, floor=stated)
         if floor is not None and (f := building.floor(floor)) and floor != item_floor:
             anchor.ny = f.ny  # same spot on another floor (e.g. "stairwell B, floor 3")
         return Location(

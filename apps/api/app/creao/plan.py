@@ -4,7 +4,9 @@ Rules (from the product decisions):
 - Routes only ever come from the building profile's exits; nothing is invented.
 - An exit is unsafe when a hazard is reported or verified there, or the fire model predicts it
   will be affected within HORIZON_MIN minutes. Unsafe exits are never proposed.
-- Among safe exits, prefer the nearest one that isn't overcrowded.
+- With the engine's fire model active, each zone gets the engine's capacity-aware route
+  (app.creao.engine_model) for the latest departure time; the nearest safe exit that isn't
+  overcrowded is only the fallback when the engine has no route for that zone.
 - The coordinator only PROPOSES changes. People keep getting the approved route until a dispatcher
   approves a proposal, and a proposal made against an older hazard picture is refused as stale.
 """
@@ -16,7 +18,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.creao import hub
+from app.creao import engine_model, hub
 from app.creao import location as loc
 from app.creao.buildings import Anchor, Building, Exit
 from app.creao.db import utcnow
@@ -80,11 +82,13 @@ def outside(building: Building, zone_id: str | None) -> bool:
 
 def route_zones(building: Building) -> list[str]:
     """Zones that get an exit route. Ground-floor patios don't: people there move away to the
-    assembly point instead, so they never get a route or a route-change proposal."""
+    building instead, so they never get a route or a route-change proposal."""
     return [z for z in plan_zones(building) if not outside(building, z)]
 
 
 def exit_floor(building: Building, exit: Exit) -> int:
+    if exit.floor is not None:
+        return exit.floor
     return min(building.floors, key=lambda f: abs(f.ny - exit.anchor.ny)).level
 
 
@@ -145,7 +149,7 @@ def normalize_fire_model(building: Building, model: dict) -> dict:
     return {
         "scenario_id": model.get("scenario_id", "scenario"),
         "label": model.get("label"),
-        "source": model.get("source", "fire-engine"),
+        "source": model.get("source") or "manual",  # typed in by hand unless said otherwise
         "simulation": True,
         "steps": steps,
     }
@@ -155,13 +159,18 @@ def predicted_minutes(building: Building, evacuation: Evacuation | None) -> dict
     """First minute each exit is predicted to be affected (directly or via its zone)."""
     if not evacuation or not evacuation.fire_model:
         return {}
+    # The engine times each exit's loss itself; a hand-typed model marks exits by their zone too
+    engine = engine_model.is_engine(evacuation.fire_model)
     first: dict[str, float] = {}
     for step in evacuation.fire_model.get("steps", []):
+        if engine and step.get("place_kind") != "exit":
+            continue
         first[step["place"]] = min(first.get(step["place"], math.inf), step["minute"])
     out = {}
     for exit in building.exits:
         m = min(
-            first.get(exit.id, math.inf), first.get(exit.zone, math.inf) if exit.zone else math.inf
+            first.get(exit.id, math.inf),
+            first.get(exit.zone, math.inf) if exit.zone and not engine else math.inf,
         )
         if m != math.inf:
             out[exit.id] = m
@@ -230,10 +239,37 @@ async def exit_states(
     return states
 
 
+def engine_exit(
+    building: Building, evacuation: Evacuation | None, zone_id: str
+) -> tuple[str | None, str | None]:
+    """The engine's planned (exit, then-exit) for a zone right now, if its fire model is active."""
+    if evacuation is None or not engine_model.is_engine(evacuation.fire_model):
+        return None, None
+    exit_id, then = engine_model.engine_route(
+        evacuation.fire_model, zone_id, minute_now(evacuation)
+    )
+    return (exit_id, then) if building.exit(exit_id) else (None, None)
+
+
+def _engine_ok(st: ExitState, now_min: float) -> bool:
+    """The engine's own route is fine unless someone reported a hazard there or the exit is
+    already lost: it already planned around when each exit goes (the 5-minute horizon is for
+    the heuristic)."""
+    if not st.unsafe:
+        return True
+    return not st.hazard_ids and st.predicted_minute is not None and st.predicted_minute > now_min
+
+
 def choose_exit(
-    building: Building, zone_id: str, states: dict[str, ExitState]
+    building: Building,
+    zone_id: str,
+    states: dict[str, ExitState],
+    preferred: str | None = None,
+    now_min: float = 0.0,
 ) -> tuple[str | None, float | None]:
     zone = building.zone(zone_id)
+    if preferred and preferred in states and _engine_ok(states[preferred], now_min):
+        return preferred, distance_m(building, zone.anchor, building.exit(preferred).anchor)
     # Only exits on the zone's own floor when it has any (e.g. stairs down from an upper patio)
     floor_exits = [e for e in building.exits if exit_floor(building, e) == zone.floor]
     best, best_score, best_dist = None, math.inf, None
@@ -266,13 +302,42 @@ async def initial_plan(
     session: AsyncSession, building: Building, evacuation: Evacuation
 ) -> dict[str, str]:
     states = await exit_states(session, building, evacuation)
+    now = minute_now(evacuation)
     plan = {}
     for zone_id in route_zones(building):
-        exit_id, _ = choose_exit(building, zone_id, states)
+        preferred, _ = engine_exit(building, evacuation, zone_id)
+        exit_id, _ = choose_exit(building, zone_id, states, preferred, now)
         if exit_id:
             plan[zone_id] = exit_id
             states[exit_id].heading += 1  # spread zones across exits a little
     return plan
+
+
+def assembly_words(building: Building) -> str:
+    """Where people go once out: an assembly exit if the profile has one, else honest words."""
+    assembly = building.exit(building.assembly_exit_id)
+    return assembly.label if assembly else building.assembly
+
+
+def once_out(building: Building) -> str:
+    assembly = building.exit(building.assembly_exit_id)
+    if assembly:
+        return f"Then go to {assembly.label}."
+    return "Then move away from the building; staff will direct you."
+
+
+MAX_LISTED_EXITS = 4  # an SMS for someone whose position we don't know
+
+
+def _floor_of(building: Building, location: dict | None) -> int | None:
+    if not location:
+        return None
+    if location.get("floor") is not None:
+        return location["floor"]
+    if location.get("anchor") and location.get("source") == "floor":
+        ny = location["anchor"]["ny"]
+        return min(building.floors, key=lambda f: abs(f.ny - ny)).level
+    return None
 
 
 def instruction(
@@ -290,19 +355,27 @@ def instruction(
     exit_id = (evacuation.approved_routes or {}).get(zone_id) if zone_id else None
     prefix = "DRILL: " if evacuation.mode == "drill" else ""
     origin = evacuation.origin_label or "the building"
-    assembly = building.exit(building.assembly_exit_id)
     lead = lead or ("Route update" if update else f"Fire reported at {origin}")
     if outside(building, zone_id):  # already outside: move away from the building
-        meet = f" to {assembly.label}" if assembly else ""
         return {
             "exit_id": None,
             "exit_label": None,
             "zone_id": zone_id,
-            "message": f"{prefix}{lead}. You're outside on {building.zone(zone_id).label}. Move away from the building"
-            f"{meet} and stay clear of the doors. Reply SAFE when you're there, or HELP.",
+            "message": f"{prefix}{lead}. You're outside on {building.zone(zone_id).label}. Move away from the building "
+            "and stay clear of the doors; staff will direct you. Reply SAFE when you're clear, or HELP.",
         }
-    if zone_id is None:  # position unknown: every approved exit, and ask where they are
-        exits = [building.exit(x) for x in approved_exits(evacuation) if building.exit(x)]
+    if zone_id is None:  # position unknown: the approved exits (on their floor if we know it)
+        floor = _floor_of(building, location)
+        routes = evacuation.approved_routes or {}
+        on_floor = [
+            x
+            for z, x in routes.items()
+            if floor is not None and building.zone(z) and building.zone(z).floor == floor
+        ]
+        ids = on_floor or list(routes.values())
+        # the exits most zones are routed to first; an SMS can't list every door
+        ranked = sorted(dict.fromkeys(ids), key=lambda x: -ids.count(x))
+        exits = [building.exit(x) for x in ranked if building.exit(x)][:MAX_LISTED_EXITS]
         if not exits:
             return {
                 "exit_id": None,
@@ -317,12 +390,18 @@ def instruction(
             "zone_id": None,
             "exits": [e.id for e in exits],
             "message": f"{prefix}{lead}. Leave now by the nearest of: {', '.join(e.label for e in exits)}. "
-            f"Avoid {origin}. Reply SAFE, HELP, or CALL, and tell us where you are.",
+            f"Avoid {origin}. Don't use the elevator. Reply SAFE, HELP, or CALL, and tell us where you are.",
         }
     if exit_id:
         exit = building.exit(exit_id)
-        rally = f" and go to {assembly.label}" if assembly and assembly.id != exit_id else ""
-        message = f"{prefix}{lead}. Leave now via {exit.label}{rally}. Reply SAFE, HELP, or CALL."
+        planned, then_id = engine_exit(building, evacuation, zone_id)
+        then = building.exit(then_id) if planned == exit_id and then_id else None
+        way = f"{exit.label}, then out by {then.label}" if then else exit.label
+        down = " Don't use the elevator." if exit.kind == "stair" else ""
+        message = (
+            f"{prefix}{lead}. Leave now via {way}. {once_out(building)}{down} "
+            "Reply SAFE, HELP, or CALL."
+        )
         return {
             "exit_id": exit_id,
             "exit_label": exit.label,
@@ -438,7 +517,8 @@ async def reevaluate(
                 if p.zone_id == zone_id:
                     p.status = ProposalStatus.stale
             continue
-        best, dist = choose_exit(building, zone_id, states)
+        preferred, _ = engine_exit(building, evacuation, zone_id)
+        best, dist = choose_exit(building, zone_id, states, preferred, minute_now(evacuation))
         if best == current:
             continue
         zone = building.zone(zone_id)
@@ -450,7 +530,13 @@ async def reevaluate(
             else "no approved route"
         )
         why_to = (
-            f"Proposed {states[best].label}: open, {dist:.0f} m from {zone.label}, {states[best].heading} heading"
+            f"Proposed {states[best].label}: "
+            + (
+                "the engine's planned route now (simulation), "
+                if best and best == preferred
+                else "open, "
+            )
+            + f"{dist:.0f} m from {zone.label}, {states[best].heading} heading"
             if best
             else "No safe exit: shelter in place and send crews"
         )
@@ -578,7 +664,13 @@ async def decide(
             "decided_by": dispatcher,
         },
     )
-    await hub.send_texts(building.id, recipients, reason="route_change")
+    await hub.send_texts(
+        building.id,
+        recipients,
+        reason="route_change",
+        drill=evacuation.mode != "live",
+        approved_by=dispatcher,
+    )
     return {"proposal": proposal_out(proposal, building), "recipients": recipients}
 
 
@@ -608,7 +700,7 @@ async def propose_from_agent(
         raise ProposalRejected(f"Unknown zone {zone!r}; use a zone id from the building profile")
     if zone_id not in route_zones(building):
         raise ProposalRejected(
-            f"{building.zone(zone_id).label} is outdoors; people there go to the assembly point"
+            f"{building.zone(zone_id).label} is outdoors; people there move away from the building"
         )
     exit_id = None
     if to_exit:
@@ -619,9 +711,7 @@ async def propose_from_agent(
             )
         x = building.exit(exit_id)
         if x.assembly and not x.zone:
-            raise ProposalRejected(
-                f"{x.label} is the assembly point, not a way out; propose a door"
-            )
+            raise ProposalRejected(f"{x.label} is not a way out of the building; propose a door")
         here = building.zone(zone_id).floor
         if exit_floor(building, x) != here and any(
             exit_floor(building, e) == here for e in building.exits

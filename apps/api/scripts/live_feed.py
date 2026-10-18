@@ -1,20 +1,26 @@
 """Play a fire drill through the CREAO layer, as Sai's Photon + ElevenLabs pipeline would send it.
 
 Everything goes through the real endpoints: occupants are registered, a dispatcher declares the
-drill with a fire model (simulation), and texts and call lines arrive as /live/intake/events
-envelopes. Some people never reply, so the 60 s chase kicks in. Watch it live with:
+drill with a fire origin (the API runs Aria's engine for the fire model and the routes), and
+texts and call lines arrive as /live/intake/events envelopes. Every scripted event is tagged
+source "simulated" and the people are fake (+1555500xxxx). Some never reply, so the 60 s chase
+kicks in. Watch it live with:
 
     curl -N "http://localhost:8000/live/stream?building_id=547b5ec5-30c5-4f76-8080-012a52e90bd9"
 
-    uv run python scripts/live_feed.py                   # play the drill
+    uv run python scripts/live_feed.py                   # play the drill (localhost only)
     uv run python scripts/live_feed.py --approve         # also approve the first route change, as a dispatcher
+    uv run python scripts/live_feed.py --origin 140      # fire starts in another venue space
+    uv run python scripts/live_feed.py --base https://... --allow-remote   # a deployed API, on purpose
 """
 
 import argparse
 import asyncio
 import os
 import random
+import sys
 import uuid
+from urllib.parse import urlparse
 
 import httpx
 
@@ -45,15 +51,17 @@ NAMES = [
     "Wren",
     "Zoe",
 ]
-ZONES = ["Collins Room", "galleria", "Founders' Room", "Collins Patio", "networking", None]
-FIRE_MODEL = {
-    "label": "Galleria fire (simulation)",
-    "steps": [
-        {"minute": 0, "place": "galleria", "kind": "fire"},
-        {"minute": 4, "place": "galleria far end", "kind": "smoke"},
-        {"minute": 8, "place": "restrooms", "kind": "smoke"},
-    ],
-}
+ZONES = [
+    "Collins Room",
+    "galleria",
+    "Founders' Room",
+    "Collins Patio",
+    "room 219",
+    "upstairs at the workshops",
+    None,
+]
+SOURCE = "simulated"  # never "photon": these texts and calls are scripted, not real
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 class Pipeline:
@@ -71,7 +79,7 @@ class Pipeline:
             json={
                 "eventId": uuid.uuid4().hex,
                 "eventType": kind,
-                "source": "photon",
+                "source": SOURCE,
                 "payload": {"buildingId": VENUE, **payload},
             },
         )
@@ -98,7 +106,7 @@ async def call(
         await asyncio.sleep(gap)
 
 
-async def main(base: str, approve: bool) -> None:
+async def main(base: str, approve: bool, origin: str, growth: str) -> None:
     random.seed(4)
     p = Pipeline(base)
     people = [
@@ -115,14 +123,18 @@ async def main(base: str, approve: bool) -> None:
         f"/buildings/{VENUE}/evacuations",
         json={
             "mode": "drill",
-            "origin": "galleria",
+            "origin": origin,  # the API runs the engine for this start space or place
+            "growth": growth,
             "dispatcher": "AP",
-            "fire_model": FIRE_MODEL,
-            "description": "Fire drill: fire in the Galleria",
+            "description": f"Fire drill: fire in {origin}",
         },
     )
+    r.raise_for_status()
     drill = r.json()
-    print(f"DRILL declared · {len(drill['recipients'])} alerted")
+    fm = (await p.http.get(f"/buildings/{VENUE}/situation")).json().get("fire_model") or {}
+    print(f"DRILL declared · {len(drill['recipients'])} alerted · fire model: {fm.get('source')}")
+    if (fm.get("summary") or {}).get("text"):
+        print(f"  {fm['summary']['text']}")
     for x in drill["recipients"]:
         await p.event(
             "sms.sent", phone=x["phone"], text=x["message"]
@@ -206,5 +218,21 @@ if __name__ == "__main__":
     ap.add_argument(
         "--approve", action="store_true", help="approve the first route change as dispatcher AP"
     )
+    ap.add_argument(
+        "--origin", default="galleria", help="venue space id or place (see /engine/starts)"
+    )
+    ap.add_argument("--growth", default="fast", choices=["slow", "medium", "fast", "ultrafast"])
+    ap.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="allow a non-localhost --base (a deployed API: its real database and messenger)",
+    )
     args = ap.parse_args()
-    asyncio.run(main(args.base, args.approve))
+    host = urlparse(args.base).hostname or ""
+    if host not in LOCAL_HOSTS and not args.allow_remote:
+        sys.exit(
+            f"Refusing to play a scripted drill against {host!r}: it would land in that API's real "
+            "database and its messenger would text these fake people. Pass --allow-remote to do it "
+            "on purpose."
+        )
+    asyncio.run(main(args.base, args.approve, args.origin, args.growth))

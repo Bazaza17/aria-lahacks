@@ -279,6 +279,8 @@ async def build(session: AsyncSession, building: Building) -> dict[str, Any]:
                 "label": x.label,
                 "anchor": x.anchor.model_dump(),
                 "assembly": x.assembly,
+                "kind": x.kind,
+                "floor": x.floor,
                 "heading": heading,
                 "safe": safe,
                 "total": heading + safe,

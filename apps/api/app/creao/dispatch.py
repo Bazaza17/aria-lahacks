@@ -2,8 +2,10 @@
 
 - start(): declare a fire or a labeled drill. Each zone gets an approved exit (the safe, least
   crowded nearest one); every occupant gets the message for their zone (Sai's pipeline texts them).
-- Hazards and the fire model (Lincoln's engine) mark exits unsafe; the rules propose route
-  changes. Nothing reaches occupants until a dispatcher approves (plan.decide).
+- With an origin, the fire model comes from Aria's building engine (engine_model): when each
+  zone fills with smoke, when each exit is lost, and the engine's route for every zone.
+- Hazards and the fire model mark exits unsafe; the rules propose route changes. Nothing
+  reaches occupants until a dispatcher approves (plan.decide).
 - Life-threat words put a human dispatcher on the call, with a brief so they never re-ask.
 - People who ignore the alert for CHASE_AFTER get a voice call (Sai's pipeline places it).
 """
@@ -14,7 +16,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.creao import hub, plan, rules
+from app.creao import engine_model, hub, plan, rules
 from app.creao import location as loc
 from app.creao.buildings import Building, get_building
 from app.creao.db import utcnow
@@ -48,7 +50,11 @@ async def start(
     description: str | None,
     dispatcher: str | None,
     fire_model: dict | None,
+    growth: str | None = None,
 ) -> dict[str, Any]:
+    engine = None
+    if not fire_model and origin:  # the engine's fire for the declared origin (simulation)
+        engine = await engine_model.fire_model_for(building, origin, growth)
     for old in (
         await session.execute(
             select(Evacuation).where(
@@ -71,7 +77,11 @@ async def start(
         .where(Hazard.building_id == building.id, Hazard.active.is_(True))
         .values(active=False)
     )
-    place = loc.match_place(building, origin) if origin else None
+    if engine:
+        oz = building.zone(engine["origin"]["zone_id"])
+        place = ("zone", oz.id) if oz else None
+    else:
+        place = loc.match_place(building, origin) if origin else None
     item = (
         (building.exit(place[1]) if place[0] == "exit" else building.zone(place[1]))
         if place
@@ -87,10 +97,13 @@ async def start(
         started_by=dispatcher,
         approved_routes={},
         report={},
-        fire_model=plan.normalize_fire_model(building, fire_model) if fire_model else None,
+        fire_model=engine
+        or (plan.normalize_fire_model(building, fire_model) if fire_model else None),
     )
     session.add(ev)
-    if item:  # the declared fire is a verified hazard
+    # The declared fire is a verified hazard. With the engine's model, the engine times the
+    # origin's exits itself (when each is lost), so its doors aren't closed from minute 0.
+    if item and not engine:
         session.add(
             Hazard(
                 building_id=building.id,
@@ -134,7 +147,7 @@ async def start(
         building_id=building.id,
         data={"evacuation": payload["evacuation"], "recipients_count": len(recipients)},
     )
-    await hub.send_texts(building.id, recipients, reason="alert")
+    await hub.send_texts(building.id, recipients, reason="alert", drill=ev.mode != "live")
     return payload
 
 
@@ -152,10 +165,21 @@ async def end(session: AsyncSession, ev: Evacuation) -> None:
 
 
 async def set_fire_model(session: AsyncSession, building: Building, model: dict) -> dict:
+    """A hand-typed step model, or {"engine": {"start": space or place, "growth": "fast"}}."""
     ev = await plan.active_evacuation(session, building.id)
     if ev is None:
         raise LookupError("No active evacuation for this building")
-    ev.fire_model = plan.normalize_fire_model(building, model)
+    if isinstance(model.get("engine"), dict):
+        spec = model["engine"]
+        engine = await engine_model.fire_model_for(building, spec.get("start"), spec.get("growth"))
+        if engine is None:
+            raise ValueError(f"No engine start space for {spec.get('start')!r}; see /engine/starts")
+        ev.fire_model = engine
+        if not ev.origin_label:
+            ev.origin_label = engine["origin"]["label"]
+            ev.origin_zone = engine["origin"]["zone_id"]
+    else:
+        ev.fire_model = plan.normalize_fire_model(building, model)
     await session.commit()
     await hub.publish(
         "fire_model.updated", building_id=building.id, data={"steps": len(ev.fire_model["steps"])}
@@ -182,6 +206,11 @@ async def reply_for(
     """What to tell this person: only the approved route for where they are. When their reply was
     an answer to the alert (1, 2, HELP, SAFE), `answer` is the exact text to send back."""
     ev = await plan.active_evacuation(session, building.id)
+    first_contact = False
+    if ev is not None and occ.alerted_at is None:
+        # Someone we'd never alerted texts during the evacuation: they count as alerted now and
+        # get the current instruction straight back, like everyone who got the alert
+        occ.alerted_at, first_contact = utcnow(), True
     instruction = plan.instruction(building, ev, occ.location, lead=LEADS.get(intent))
     pending = (
         await session.scalar(
@@ -200,9 +229,16 @@ async def reply_for(
     chosen = states.get(occ.exit_id) if occ.exit_id else None
     if ev is not None:
         instruction = _safer(building, ev, occ, instruction, states)
-    answered = ev is not None and intent in ("evacuating", "directions", "help", "safe")
+    answered = ev is not None and (
+        first_contact or intent in ("evacuating", "directions", "help", "safe")
+    )
+    if first_contact:
+        occ.last_instruction = instruction["message"]
+        await session.commit()
     return {
         "status": occ.status.value,
+        "first_contact": first_contact,
+        "drill": ev is not None and ev.mode != "live",
         "answer": instruction["message"] if answered else None,
         "instruction": instruction,  # send this, nothing else
         "route_change_pending": bool(pending),
@@ -224,15 +260,13 @@ def _safer(
     who is out back in, someone who asked for help down the stairs, or anyone toward an exit that
     was just reported unsafe while its route change waits for the dispatcher."""
     drill = "DRILL: " if ev.mode == "drill" else ""
-    assembly = building.exit(building.assembly_exit_id)
     if occ.status == OccupantStatus.confirmed_safe:
-        meet = f" at {assembly.label}" if assembly else ""
         return {
             **instruction,
             "exit_id": None,
             "exit_label": None,
-            "message": f"{drill}Thanks, you're marked safe. Stay{meet}, away from the building, and tell responders "
-            "if you know anyone still inside.",
+            "message": f"{drill}Thanks, you're marked safe. Stay {plan.assembly_words(building)}, and tell "
+            "responders if you know anyone still inside.",
         }
     if occ.status == OccupantStatus.needs_help:
         where = (occ.location or {}).get("label")
@@ -526,6 +560,24 @@ async def resolve_handoff(session: AsyncSession, inc: Incident, dispatcher: str)
     return handoff
 
 
+async def recheck_routes(session: AsyncSession) -> int:
+    """The fire model moves on with the clock (exits get lost, the engine's routes change):
+    re-check every active evacuation that has one. Changes are proposals only."""
+    n = 0
+    for ev in (
+        (await session.execute(select(Evacuation).where(Evacuation.status == "active")))
+        .scalars()
+        .all()
+    ):
+        # filter here, not in SQL: a None fire model is stored as JSON 'null', not SQL NULL
+        if not ev.fire_model:
+            continue
+        building = get_building(ev.building_id)
+        if building:
+            n += len(await plan.reevaluate(session, building, ev))
+    return n
+
+
 async def run_chase_loop() -> None:
     import asyncio
     import logging
@@ -537,6 +589,7 @@ async def run_chase_loop() -> None:
         try:
             async with sessions()() as session:
                 await chase(session)
+                await recheck_routes(session)
         except Exception:  # noqa: BLE001
             logging.getLogger(__name__).exception("chase loop")
 

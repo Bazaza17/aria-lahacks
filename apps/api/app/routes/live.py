@@ -9,7 +9,7 @@ Intake (Sai's Photon + ElevenLabs pipeline, X-Tool-Secret):
 Live view (dispatcher dashboard + CREAO, Bearer dispatcher key):
   GET  /live/buildings/{id}/situation      pins, exits, flows, roll call, hazards, routes
   GET  /live/buildings/{id}/flow           people out per exit per 15 s (TigerData continuous aggregate)
-  GET  /live/stream?building_id=  GET  /live/stream?building_id=&token=    Server-Sent Events, streamed out of TigerDatatoken=    Server-Sent Events, streamed out of TigerData (dispatcher key or X-Tool-Secret)
+  GET  /live/stream?building_id=&token=    Server-Sent Events, streamed out of TigerData (dispatcher key or X-Tool-Secret)
   GET  /live/buildings/{id}/report[.md]    the live incident report the CREAO staff writes
   GET  /live/buildings/{id}/staff          the CREAO command staff: org chart, handoffs, activity
 
@@ -17,13 +17,16 @@ CREAO callback:
   POST /live/creao/run-result?push=<run_id>&token=   CREAO calls this when an agent run finishes
 
 Dispatcher management (Bearer dispatcher key):
-  POST /live/buildings/{id}/evacuations    declare a fire or labeled drill (approved plan + alerts)
+  POST /live/buildings/{id}/evacuations    declare a fire or labeled drill; an "origin" runs the engine
   POST /live/evacuations/{id}/end
-  PUT  /live/buildings/{id}/fire-model     the engine's fire timeline (simulation)
+  PUT  /live/buildings/{id}/fire-model     {"engine": {"start", "growth"}} or hand-typed steps
   GET  /live/buildings/{id}/route-proposals, POST /live/route-proposals/{id}/decision
   POST /live/buildings/{id}/hazards, /live/hazards/{id}/verify, /live/hazards/{id}/clear
   POST /live/incidents/{id}/acknowledge, /assign, /handoff/join, /handoff/resolve
   POST /live/occupants/{id}/retext, /call  re-send someone their approved route, or call them now
+
+Phone agent / messenger (Bearer dispatcher key or X-Tool-Secret):
+  GET  /live/buildings/{id}/brief          plain-text layout facts from the venue model
 """
 
 import asyncio
@@ -44,6 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.creao import (
     agents,
     bridge,
+    brief,
     comms,
     db,
     dispatch,
@@ -487,10 +491,18 @@ async def stream(request: Request, building_id: str | None = None) -> StreamingR
 
 class EvacuationIn(BaseModel):
     mode: Literal["drill", "live"] = "drill"
-    origin: str | None = Field(None, description="Where the fire is: zone/exit id or name")
+    origin: str | None = Field(
+        None,
+        description="Where the fire starts: a venue space id (GET /engine/starts), or a zone id or "
+        "place name. With one, Aria's engine runs the fire model (simulation).",
+        max_length=120,
+    )
+    growth: Literal["slow", "medium", "fast", "ultrafast"] | None = Field(
+        None, description="Fire growth for the engine (default fast)"
+    )
     description: str | None = None
     dispatcher: str | None = None
-    fire_model: dict | None = None
+    fire_model: dict | None = Field(None, description="A hand-typed step model instead")
 
 
 @router.post("/buildings/{building_id}/evacuations", dependencies=[Depends(require_dispatcher)])
@@ -503,6 +515,7 @@ async def start_evacuation(building_id: str, body: EvacuationIn, session: Sessio
         description=body.description,
         dispatcher=body.dispatcher,
         fire_model=body.fire_model,
+        growth=body.growth,
     )
 
 
@@ -523,6 +536,8 @@ async def put_fire_model(building_id: str, body: dict[str, Any], session: Sessio
         return await dispatch.set_fire_model(session, _building(building_id), body)
     except LookupError as e:
         raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
 
 
 @router.get(
@@ -693,15 +708,26 @@ async def occupant_action(
         raise HTTPException(404, "Unknown person")
     building = _building(occ.building_id)
     if action == "retext":
-        message = (await dispatch.reply_for(session, building, occ))["message"]
+        reply = await dispatch.reply_for(session, building, occ)
+        message = reply["instruction"]["message"]
         if not message:
             raise HTTPException(409, "No active evacuation to re-text")
         occ.last_instruction = message
         await session.commit()
-        await hub.publish(
-            "occupant.message",
-            building_id=building.id,
-            data={"phone": occ.phone, "name": occ.name, "message": message, "by": body.dispatcher},
+        await hub.send_texts(
+            building.id,
+            [
+                {
+                    "phone": occ.phone,
+                    "name": occ.name,
+                    "message": message,
+                    "exit_id": reply["instruction"].get("exit_id"),
+                }
+            ],
+            reason="retext",
+            drill=reply["drill"],
+            by="dispatcher",
+            dispatcher=body.dispatcher,
         )
         return {"ok": True, "message": message}
     occ.call_requested_at = utcnow()
@@ -797,7 +823,7 @@ _VIEW = Path(__file__).resolve().parent.parent / "creao" / "view.html"
 @limiter.exempt
 async def view() -> HTMLResponse:
     """A live map of the layer (pins, exits, roll call, approvals, CREAO staff). Asks for a dispatcher key."""
-    return HTMLResponse(_VIEW.read_text(), headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(_VIEW.read_text(encoding="utf-8"), headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/buildings", dependencies=[Depends(require_dispatcher_or_tool)])
@@ -812,6 +838,13 @@ async def buildings_list() -> list[dict]:
 @router.get("/buildings/{building_id}", dependencies=[Depends(require_dispatcher_or_tool)])
 async def building_profile(building_id: str) -> dict:
     return _building(building_id).model_dump(mode="json")
+
+
+@router.get("/buildings/{building_id}/brief", dependencies=[Depends(require_dispatcher_or_tool)])
+async def building_brief(building_id: str) -> dict:
+    """Plain-text layout facts for the phone agent (floors, rooms, every exit, the stairs), from
+    the profile generated from the engine's venue model."""
+    return brief.brief(_building(building_id).id)
 
 
 SCANS = Path(__file__).resolve().parents[3] / "web" / "public" / "scans"

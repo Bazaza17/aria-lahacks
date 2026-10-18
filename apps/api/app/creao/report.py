@@ -72,7 +72,9 @@ async def _drafts(session: AsyncSession, building: Building, s: dict) -> dict[st
         )
         or "No hazards reported."
     )
-    if s["fire_model"]:
+    if s["fire_model"] and (s["fire_model"].get("summary") or {}).get("text"):
+        lines["hazards"] += "\n" + s["fire_model"]["summary"]["text"]
+    elif s["fire_model"]:
         lines["hazards"] += "\nFire model (simulation): " + ", ".join(
             f"{st['kind']} at {st['label']} by minute {st['minute']:g}"
             for st in s["fire_model"]["steps"]

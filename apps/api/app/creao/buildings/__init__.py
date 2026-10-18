@@ -1,9 +1,10 @@
 """Building profiles: floors, named zones and exits, in Aria's scan coordinates.
 
-One JSON file per building here. Anchors are normalized (nx, ny, nz in 0..1 of the scan mesh's
-bounding box), the same space as apps/web/lib/scan-coords.ts, so pins line up with the 3D viewer.
-james_west.json is the venue (James West Alumni Center), the only building: The Dock, the Miami
-demo, was removed, and a default building id that names no profile here falls back to the first one.
+One JSON file per building here. james_west.json is the venue (James West Alumni Center), the
+only building, and it is GENERATED from the engine's venue model (packages/engine/venue.json) by
+scripts/build_profile.py: zones are venue spaces, exits are every venue exit plus the stairs down
+from floor 2. Anchors are normalized in 'frame' (the venue frame, metres), which view.html maps
+back onto the scan. A default building id that names no profile here falls back to the first one.
 
 People and incidents are only ever placed at these named zones and exits (or GPS). Nothing is
 invented: anything else falls back to the floor or building, marked approximate.
@@ -29,6 +30,9 @@ class Floor(BaseModel):
     level: int
     label: str
     ny: float
+    source: str | None = None  # what the floor's geometry comes from (scan / floor plan)
+    anchor: Anchor | None = None  # "somewhere on this floor": the middle of its indoor rooms
+    aliases: list[str] = []  # words for the floor that name no single room ("upstairs")
 
 
 class Zone(BaseModel):
@@ -42,6 +46,9 @@ class Zone(BaseModel):
     outdoor: bool = False  # a patio or courtyard
     spaces: list[str] = []  # the venue spaces (packages/engine/venue.json) this zone covers
     aliases: list[str] = []
+    event_name: str | None = None  # the LA Hacks event map's name for it
+    occupants: int = 0  # venue.json occupant_load (its default scenario)
+    source: str | None = None  # "scan" or "floor plan"
 
 
 class Exit(BaseModel):
@@ -51,6 +58,11 @@ class Exit(BaseModel):
     zone: str | None = None
     assembly: bool = False
     opening: str | None = None  # the venue opening (door or stair) it is
+    openings: list[str] = []  # every venue opening it stands for (a stair with two flights)
+    kind: str = "door"  # "door" (out of the building) or "stair" (a way down from floor 2)
+    floor: int | None = None
+    exterior: bool = True  # a venue exit (is_exit); False for the inside stairs down
+    note: str | None = None
     aliases: list[str] = []
 
 
@@ -78,6 +90,17 @@ class Building(BaseModel):
     zones: list[Zone] = []
     exits: list[Exit] = []
     assembly_exit_id: str | None = None
+    # Where people go once out. No assembly point is confirmed for the venue, so it's words only
+    assembly: str = "outside, away from the building, where staff direct you"
+    generated_at: str | None = None
+    occupant_scenario: str | None = None
+    venue_schema_version: str | None = None
+
+    def exit_for_opening(self, opening: str | None) -> Exit | None:
+        return next(
+            (e for e in self.exits if opening and (opening == e.opening or opening in e.openings)),
+            None,
+        )
 
     def zone(self, zone_id: str | None) -> Zone | None:
         return next((z for z in self.zones if z.id == zone_id), None)
@@ -93,7 +116,11 @@ class Building(BaseModel):
 def all_buildings() -> dict[str, Building]:
     out = {}
     for path in sorted(Path(__file__).parent.glob("*.json")):
-        data = {k: v for k, v in json.loads(path.read_text()).items() if not k.startswith("_")}
+        data = {
+            k: v
+            for k, v in json.loads(path.read_text(encoding="utf-8")).items()
+            if not k.startswith("_")
+        }
         b = Building.model_validate(data)
         out[b.id] = b
     return out
