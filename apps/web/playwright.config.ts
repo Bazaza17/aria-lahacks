@@ -8,7 +8,8 @@ export default defineConfig({
   timeout: 240_000,
   expect: { timeout: 15_000 },
   use: {
-    baseURL: "http://localhost:3000",
+    // E2E_BASE_URL=https://aria-lahacks.vercel.app runs the suite against the deployed site.
+    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",
