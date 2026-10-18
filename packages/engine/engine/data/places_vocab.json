@@ -1,0 +1,31 @@
+{
+  "about": "Words and weights for engine.places search. Copied into places.json (vocab) so the viewer's port of search() uses the same ones.",
+  "filler": ["the", "a", "an", "at", "in", "on", "of", "to", "near", "by", "show", "me", "find", "ping", "where", "is", "locate", "please", "pin", "go", "room", "rm", "part", "and"],
+  "compass": ["north", "south", "east", "west", "northeast", "northwest", "southeast", "southwest", "northern", "southern", "eastern", "western", "ne", "nw", "se", "sw"],
+  "storeys": {
+    "1F": ["first floor", "1st floor", "ground floor", "ground level", "floor 1", "level 1", "1f", "downstairs", "main floor", "1st"],
+    "2F": ["second floor", "2nd floor", "floor 2", "level 2", "2f", "upstairs", "upper floor", "2nd"],
+    "3F": ["third floor", "3rd floor", "floor 3", "level 3", "3f", "3rd"]
+  },
+  "intents": {
+    "stair": {"words": ["stair", "stairs", "stairway", "staircase", "stairwell"], "types": {"stair": 30, "step": 8}},
+    "step": {"words": ["step", "steps", "riser", "risers"], "types": {"step": 30, "stair": 10}},
+    "ramp": {"words": ["ramp"], "types": {"ramp": 30}},
+    "exit": {"words": ["exit", "exits", "way out", "egress", "emergency exit"], "types": {"exit": 30}},
+    "entrance": {"words": ["entrance", "entry", "front door", "front doors", "main door"], "types": {"exit": 15}},
+    "door": {"words": ["door", "doors", "doorway"], "types": {"exit": 10, "door": 15, "gate": 5}},
+    "gate": {"words": ["gate", "gates"], "types": {"gate": 30}},
+    "elevator": {"words": ["elevator", "elevators", "lift"], "types": {"elevator": 30}},
+    "restroom": {"words": ["restroom", "restrooms", "bathroom", "bathrooms", "toilet", "toilets", "washroom", "wc"], "types": {"restroom": 30}},
+    "outdoor": {"words": ["patio", "courtyard", "outside", "outdoors", "lawn", "plaza", "terrace", "porch"], "types": {"outdoor": 12}}
+  },
+  "kind_words": {
+    "restroom": ["restroom", "bathroom", "toilet"],
+    "elevator": ["elevator", "lift"],
+    "open_to_below": ["skylight", "atrium", "well", "open to below"],
+    "outdoor": ["outside"],
+    "lobby": ["lobby"],
+    "corridor": ["corridor", "hallway", "hall"]
+  },
+  "weights": {"exact": 90, "name": 70, "terms": 50, "fuzzy": 25, "fuzzy_min": 0.75, "room_number": 20, "tie_margin": 5}
+}

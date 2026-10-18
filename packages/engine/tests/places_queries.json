@@ -1,0 +1,20 @@
+{
+  "about": "Shared place-search cases for engine.places.search and any port of it (the viewer, the agent tool). refs: the features (venue.json ids) in `matches`, any order. first: the first match's place id. Optional: storey (the storey the query names), scanned (of the first match), note (a substring of the result's note).",
+  "cases": [
+    {"query": "stairs first floor", "storey": "1F", "ambiguous": true, "first": "stair:ST-100:galleria_far_end", "refs": ["ST-100", "ST-NE-1", "ST-NE-2", "ST-W"], "scanned": true},
+    {"query": "main entrance", "ambiguous": true, "first": "opening:D-110-OUT-1", "refs": ["D-110-OUT-1", "D-110-OUT-2"]},
+    {"query": "Collins Room", "ambiguous": true, "first": "space:140", "refs": ["140", "150"]},
+    {"query": "stairs to 2nd floor", "ambiguous": false, "first": "stair:ST-W:w_stair_enclosure", "refs": ["ST-W"]},
+    {"query": "room 219", "ambiguous": false, "first": "space:219", "refs": ["219"], "scanned": false},
+    {"query": "the ramp", "ambiguous": false, "first": "opening:R-110-galleria_far_end", "refs": ["R-110-galleria_far_end"]},
+    {"query": "restrooms", "ambiguous": true, "first": "space:121", "refs": ["121", "131"]},
+    {"query": "elevator", "ambiguous": false, "first": "opening:E-110EL-110", "refs": ["E-110EL-110"]},
+    {"query": "fire alarm panel", "ambiguous": true, "first": "landmark:ann_panel", "refs": ["ann_panel", "130C"]},
+    {"query": "upstairs", "storey": "2F", "ambiguous": true, "first": "stair:ST-100:landing_200st", "refs": ["ST-100", "ST-NE-1", "ST-NE-2", "ST-W", "ST-230-330"], "note": "A floor on its own"},
+    {"query": "west ramp", "ambiguous": false, "first": "opening:R-110-galleria_far_end", "refs": ["R-110-galleria_far_end"], "note": "Compass words not used"},
+    {"query": "Galleria", "ambiguous": true, "first": "space:110", "refs": ["110", "galleria_far_end", "corridor_core"]},
+    {"query": "colins room", "ambiguous": true, "first": "space:140", "refs": ["140", "150"]},
+    {"query": "restroom 2nd floor", "storey": "2F", "ambiguous": false, "first": "space:core_2f", "refs": ["core_2f"]},
+    {"query": "stage", "ambiguous": false, "first": null, "refs": [], "note": "No place matches"}
+  ]
+}
