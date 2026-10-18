@@ -12,6 +12,7 @@ import {
   type SizeUpExit,
 } from "@/lib/scan-fire";
 
+import { LiveResponseCard } from "./LiveResponseCard";
 import { useScenario } from "./ScenarioProvider";
 
 // Exits listed before "↳ n more exits"; events listed around the clock before "↳ all n events".
@@ -94,6 +95,16 @@ export function SizeUpPanel({ buildingId }: { buildingId: string }) {
         : null;
   const flashedOver = sizeUp?.first_flashover_s != null && fireTime >= sizeUp.first_flashover_s;
 
+  const startLabel =
+    fireStarts?.starts.find((s) => s.id === pickerValue)?.label ?? sizeUp?.origin.name ?? null;
+  const liveSection = (
+    <LiveResponseCard
+      buildingId={buildingId}
+      fireStart={pickerValue || null}
+      fireLabel={startLabel}
+    />
+  );
+
   const fireSection = (
     <Section title="Fire starts in" n={1}>
       {fireStarts && (
@@ -117,6 +128,7 @@ export function SizeUpPanel({ buildingId }: { buildingId: string }) {
   if (!sizeUp) {
     return (
       <PanelShell>
+        {liveSection}
         {fireSection}
         <p className="caps px-5 py-6 text-[11px] leading-relaxed text-dim">
           {failed ? "Engine offline · size-up unavailable" : "Running the engine…"}
@@ -139,6 +151,7 @@ export function SizeUpPanel({ buildingId }: { buildingId: string }) {
 
   return (
     <PanelShell>
+      {liveSection}
       {fireSection}
 
       {dep && (

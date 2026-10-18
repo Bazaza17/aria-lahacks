@@ -376,6 +376,14 @@ export default function LandingPage() {
               Open Dashboard
               <span aria-hidden>→</span>
             </Link>
+            {/* The live response (CREAO agents, texts, calls): served by the API via /live. */}
+            <a
+              href="/live/view"
+              className="inline-flex h-11 items-center gap-3 border border-control px-[22px] text-[15px] text-fg transition-colors hover:border-white"
+            >
+              Live response
+              <span aria-hidden>↗</span>
+            </a>
             <button
               onClick={() =>
                 containerRef.current?.scrollBy({ top: window.innerHeight, behavior: "smooth" })

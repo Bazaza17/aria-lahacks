@@ -23,6 +23,7 @@
 
   header { display: flex; align-items: center; justify-content: space-between; gap: 20px; height: 60px; padding: 0 24px; border-bottom: 1px solid var(--line); }
   header .left, header .right { display: flex; align-items: center; gap: 14px; min-width: 0; }
+  .back { font-family: "DM Mono", ui-monospace, monospace; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 6px 10px; border: 1px solid var(--line-2); white-space: nowrap; } .back:hover { color: var(--ink); border-color: #fff; }
   .bname { display: flex; align-items: center; gap: 10px; } .bname i { width: 7px; height: 7px; border-radius: 99px; background: var(--accent); flex-shrink: 0; }
   .bname select { background: transparent; border: 0; font-size: 15px; font-weight: 600; color: var(--ink); cursor: pointer; }
   .bname select option { background: #0e1013; }
@@ -175,6 +176,8 @@
 <body>
 <header>
   <div class="left">
+    <a class="back" id="backLink" href="/building/547b5ec5-30c5-4f76-8080-012a52e90bd9" title="Back to the fire model and pre-plan">&larr; Fire model</a>
+    <a class="back" href="/dashboard">Dashboard</a>
     <span class="bname"><i></i><select id="building" aria-label="Building"></select></span>
     <span id="mode" class="mode idle">NO INCIDENT</span>
     <span id="sub" class="sub"></span>
@@ -222,6 +225,8 @@
 const PRI = { P1: "#ff5a48", P2: "#f08a4b", P3: "#e0b341", P4: "#8fb4e6" };
 const CHASE_SECS = 60;  // the messenger calls anyone silent this long after the alert (dispatch.CHASE_AFTER)
 const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} } };
+// read before setBuilding rewrites the URL to ?building=…
+const ASKED_ORIGIN = new URLSearchParams(location.search).get("origin");
 const S = { key: store.get("ariaKey") || "", me: store.get("ariaMe") || "Guest", b: null, profile: null,
             s: null, staff: null, floor: 1, seen: new Set(), drawn: new Set(), qseen: new Set(), retexted: {}, open: null, es: null, agentSteps: false };
 const $ = (id) => document.getElementById(id);
@@ -421,8 +426,11 @@ async function renderCtl() {
   const st = await loadStarts();
   if (S.s?.evacuation) return;  // declared while we waited
   const floors = [...new Set(st.list.map((x) => x.storey))];
+  // the building page's "Run a drill" link passes its fire start: /live/view?origin=140
+  const asked = ASKED_ORIGIN;
+  const pick = st.list.some((x) => x.id === asked) ? asked : st.def;
   const opts = floors.map((f) => `<optgroup label="${f === "1F" ? "Floor 1" : `Floor ${esc(f.replace("F", ""))} (floor plan)`}">${st.list.filter((x) => x.storey === f)
-    .map((x) => `<option value="${esc(x.id)}" ${x.id === st.def ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</optgroup>`).join("");
+    .map((x) => `<option value="${esc(x.id)}" ${x.id === pick ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</optgroup>`).join("");
   // live mode only with a dispatcher key; anyone can run a drill
   const mode = keyOk() ? `<select id="declMode" aria-label="Drill or live"><option value="drill" selected>Drill</option><option value="live">Live fire</option></select>` : "";
   $("ctl").innerHTML = (st.list.length ? `<select id="origin" aria-label="Fire origin">${opts}</select>` : "")
@@ -581,7 +589,7 @@ setInterval(() => { if (S.s) { renderQueue(); markQueueSeen(); } }, 5000);  // k
 
 // ------------------------------------------------------------------ start
 async function selectBuilding(id) {
-  S.b = id; S.seen = new Set(); S.drawn = new Set(); S.open = null; ctlFor = null; starts = null; $("drawer").classList.remove("open");
+  S.b = id; if ($("backLink")) $("backLink").href = `/building/${encodeURIComponent(id)}`; S.seen = new Set(); S.drawn = new Set(); S.open = null; ctlFor = null; starts = null; $("drawer").classList.remove("open");
   S.profile = await api(`/live/buildings/${id}`);
   window.Scene3D?.setBuilding?.();
   const levels = S.profile.floors.map((f) => f.level); if (!levels.includes(S.floor)) S.floor = levels[0];

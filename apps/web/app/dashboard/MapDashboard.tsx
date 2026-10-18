@@ -3,6 +3,7 @@
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { BRAND } from "@/lib/brand";
@@ -48,6 +49,7 @@ export function MapDashboard({
   const secondary = useMemo(() => buildings.slice(1), [buildings]);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
+  const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = buildings.find((b) => b.id === selectedId) ?? primary;
   const scannedCount = buildings.filter((b) => b.scan_url).length;
@@ -78,12 +80,12 @@ export function MapDashboard({
       console.error("[mapbox-error]", e?.error?.message ?? e);
     });
 
-    // The venue: a square marker with its name; clicking it selects it like a map click.
+    // The venue: a square marker with its name; clicking it opens the building's fire model.
     let marker: mapboxgl.Marker | null = null;
     if (primary) {
       const el = document.createElement("button");
       el.type = "button";
-      el.setAttribute("aria-label", `Select ${splitAddress(primary.address).name}`);
+      el.setAttribute("aria-label", `Open ${splitAddress(primary.address).name}`);
       el.className = "flex cursor-pointer items-center gap-3";
       el.innerHTML =
         '<span class="flex h-11 w-11 items-center justify-center border border-white/60 bg-page/60">' +
@@ -95,6 +97,7 @@ export function MapDashboard({
       el.addEventListener("click", (ev) => {
         ev.stopPropagation();
         setSelectedId(primary.id);
+        if (primary.scan_url) router.push(`/building/${primary.id}`);
       });
       // Anchor on the square's centre (22px in from the left edge).
       marker = new mapboxgl.Marker({ element: el, anchor: "left", offset: [-22, 0] })
@@ -226,7 +229,15 @@ export function MapDashboard({
     if (map.isStyleLoaded()) onStyleReady();
     else map.once("style.load", onStyleReady);
 
-    // Clicking a pre-planned building selects it in the panel; anything else leaves it be.
+    // Clicking the venue's circle (or a pre-planned building) opens its fire model when it has a
+    // scan, and selects it in the panel otherwise.
+    const pointer = (on: boolean) => () => {
+      map.getCanvas().style.cursor = on ? "pointer" : "";
+    };
+    for (const id of ["venue-pulse", "venue-dot", "venue-secondary-dot"]) {
+      map.on("mouseenter", id, pointer(true));
+      map.on("mouseleave", id, pointer(false));
+    }
     map.on("click", (e) => {
       const layerIds = [
         "venue-dot",
@@ -239,7 +250,10 @@ export function MapDashboard({
         : [];
       if (features.length === 0) return;
       const matched = findClosestBuilding(buildings, [e.lngLat.lng, e.lngLat.lat], VENUE_MATCH_DEG);
-      if (matched) setSelectedId(matched.id);
+      if (!matched) return;
+      setSelectedId(matched.id);
+      const onVenueCircle = features.some((f) => f.layer?.id !== "building-extrusion");
+      if (onVenueCircle && matched.scan_url) router.push(`/building/${matched.id}`);
     });
 
     return () => {
@@ -247,7 +261,7 @@ export function MapDashboard({
       map.remove();
       mapRef.current = null;
     };
-  }, [mapboxToken, primary, secondary, buildings]);
+  }, [mapboxToken, primary, secondary, buildings, router]);
 
   const selectedName = selected ? splitAddress(selected.address) : null;
 
@@ -323,6 +337,14 @@ export function MapDashboard({
                   >
                     View building <span aria-hidden>→</span>
                   </Link>
+                ) : null}
+                {selected.scan_url ? (
+                  <a
+                    href={`/live/view?building=${selected.id}`}
+                    className="flex h-[38px] items-center justify-between border border-control px-3.5 text-[14px] text-fg transition-colors hover:border-white"
+                  >
+                    Live response <span aria-hidden>↗</span>
+                  </a>
                 ) : (
                   <div className="flex h-[38px] items-center border border-control px-3.5 text-[14px] text-quiet">
                     Pre-plan pending
