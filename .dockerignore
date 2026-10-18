@@ -1,0 +1,9 @@
+# Build context is the repo root (apps/api/Dockerfile). Keep secrets and local junk out.
+**/.env
+**/.env.*
+!**/.env.example
+**/.venv
+**/node_modules
+**/__pycache__
+**/.next
+apps/web/public/scans

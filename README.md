@@ -108,15 +108,16 @@ Agents: see [`apps/agents/README.md`](apps/agents/README.md).
 | Piece | Host | Root directory |
 |---|---|---|
 | Frontend (Next.js) | Vercel | `apps/web` |
-| API (FastAPI) | Railway (Dockerfile) | `apps/api` |
+| API (FastAPI) | Railway (Dockerfile) | repo root (blank) |
 | Agents | Laptop with an Agentverse mailbox, or any cloud host | `apps/agents` |
 | Database + scan storage | Supabase | — |
 
 Deploy the API first so you have its URL for the frontend.
 
-1. **API → Railway:** New Project → Deploy from GitHub repo → this repo. Set
-   **Root Directory** to `apps/api`; the build uses `apps/api/Dockerfile`
-   (configured in `railway.toml`). Add the API variables above, then
+1. **API → Railway:** New Project → Deploy from GitHub repo → this repo. Leave
+   **Root Directory** blank (the repo root), so the image also gets
+   `packages/engine`; the root `railway.toml` points the build at
+   `apps/api/Dockerfile`. Add the API variables above, then
    **Settings → Networking → Generate Domain**. `GET <url>/health` should
    return `{"ok": true}`. CORS always allows `http://localhost:3000` and any
    `*.vercel.app` origin; add other domains with `ALLOWED_ORIGINS`.

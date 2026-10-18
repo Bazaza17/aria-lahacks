@@ -1,0 +1,11 @@
+# Railway config for the API service. Its root directory is the repo root (blank in Railway's
+# settings) so the image also gets packages/engine; the Dockerfile lives in apps/api.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/api/Dockerfile"
+watchPatterns = ["apps/api/**", "packages/engine/**", "railway.toml"]
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 60
+restartPolicyType = "on_failure"
