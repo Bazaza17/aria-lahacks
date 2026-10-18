@@ -268,7 +268,7 @@ async function refresh() {
   try {
     const [s, staff] = await Promise.all([api(`/live/buildings/${S.b}/situation`), api(`/live/buildings/${S.b}/staff`)]);
     S.s = s; S.staff = staff; keyBadge(); render();
-    if (S.open) openReport(S.open, true);
+    if (S.open === "after") openAfterAction(true); else if (S.open) openReport(S.open, true);
   } catch (e) { console.warn(e); }
 }
 function connect() {
@@ -278,7 +278,7 @@ function connect() {
   es.onerror = () => { $("conn").classList.remove("on"); $("connText").textContent = "RECONNECTING"; };
   ["incident.updated", "incident.event", "roll_call.changed", "roll_call.registered", "hazard.reported", "route.proposed", "route.approved",
    "route.rejected", "evacuation.started", "evacuation.ended", "handoff.requested", "handoff.joined", "agent.activity", "report.updated",
-   "fire_model.updated", "occupant.message", "occupant.call_requested", "handoff.transferred", "comms.event"].forEach((k) => es.addEventListener(k, soon));
+   "fire_model.updated", "occupant.message", "occupant.call_requested", "handoff.transferred", "comms.event", "console.cleared"].forEach((k) => es.addEventListener(k, soon));
 }
 
 // ------------------------------------------------------------------ markers (drawn over the 3D scan)
@@ -411,9 +411,13 @@ async function loadStarts() {
   return starts;
 }
 async function renderCtl() {
-  const ev = S.s?.evacuation, key = ev ? `ev:${ev.id}:${keyOk()}` : `idle:${keyOk()}`;
+  const ev = S.s?.evacuation, last = S.s?.last_evacuation;
+  const key = ev ? `ev:${ev.id}:${keyOk()}` : `idle:${keyOk()}:${!!S.s?.leftovers}:${last?.id || ""}:${!!last?.after_action}`;
   if (ctlFor === key) return; ctlFor = key;
   if (ev) { $("ctl").innerHTML = `<button class="btn end" onclick="endEvacuation(this)">End ${esc(ev.mode)}</button>`; return; }
+  // idle: clear what a past drill left behind, reopen its after-action report
+  const after = (S.s?.leftovers ? `<button class="btn end" onclick="clearConsole(this)" title="Close leftover incidents, hazards and roll-call states">Clear</button>` : "")
+    + (last?.after_action ? `<button class="btn" onclick="openAfterAction()">Last report</button>` : "");
   const st = await loadStarts();
   if (S.s?.evacuation) return;  // declared while we waited
   const floors = [...new Set(st.list.map((x) => x.storey))];
@@ -422,7 +426,7 @@ async function renderCtl() {
   // live mode only with a dispatcher key; anyone can run a drill
   const mode = keyOk() ? `<select id="declMode" aria-label="Drill or live"><option value="drill" selected>Drill</option><option value="live">Live fire</option></select>` : "";
   $("ctl").innerHTML = (st.list.length ? `<select id="origin" aria-label="Fire origin">${opts}</select>` : "")
-    + `${mode}<button class="btn solid" onclick="declareDrill(this)">Declare${keyOk() ? "" : " drill"}</button>`;
+    + `${mode}<button class="btn solid" onclick="declareDrill(this)">Declare${keyOk() ? "" : " drill"}</button>${after}`;
 }
 async function declareDrill(btn) {
   const origin = $("origin")?.value || null, mode = $("declMode")?.value === "live" ? "live" : "drill";
@@ -439,9 +443,17 @@ async function declareDrill(btn) {
 }
 async function endEvacuation(btn) {
   const ev = S.s?.evacuation; if (!ev) return;
-  if (!confirm(`End the ${ev.mode}?`)) return;
+  if (!confirm(`End the ${ev.mode}? The console clears and the CREAO Scribe writes the after-action report.`)) return;
+  btn.disabled = true; btn.textContent = "Ending…";
+  let ended = false;
+  try { await api(`/live/evacuations/${ev.id}/end`, { method: "POST", body: "{}" }); ended = true; } catch (e) { say(e); }
+  finally { ctlFor = null; await refresh(); }
+  if (ended) openAfterAction();
+}
+async function clearConsole(btn) {
+  if (!confirm("Clear the console? Leftover incidents and hazards close and everyone's roll-call state resets (registrations stay).")) return;
   btn.disabled = true;
-  try { await api(`/live/evacuations/${ev.id}/end`, { method: "POST", body: "{}" }); } catch (e) { say(e); }
+  try { await api(`/live/buildings/${S.b}/clear`, { method: "POST", body: "{}" }); } catch (e) { say(e); }
   finally { ctlFor = null; refresh(); }
 }
 // Exact seconds when the engine sent them (t_s, last_out_s), floored like the web size-up's clock.
@@ -457,7 +469,7 @@ function renderFireline() {
     ${lost ? `<span class="x">Exits lost:</span>${lost}` : ""}<span class="risk">${esc(risk)}</span>`;
   el.title = sm?.text || ""; el.classList.add("on");
 }
-Object.assign(window, { declareDrill, endEvacuation });
+Object.assign(window, { declareDrill, endEvacuation, clearConsole });
 
 // ------------------------------------------------------------------ render
 // The map: the 3D scan with the live markers over it
@@ -524,6 +536,37 @@ async function openReport(id, quiet) {
   if (!quiet) render();
 }
 function closeReport() { S.open = null; $("drawer").classList.remove("open"); render(); }
+// ------------------------------------------------------------------ after-action report (CREAO Scribe, from TigerData)
+async function openAfterAction(quiet) {
+  S.open = "after"; hideHover();
+  let r; try { r = await api(`/live/buildings/${S.b}/after-action`); } catch (e) { if (!quiet) say(e); return; }
+  const ev = r.evacuation, f = r.facts || {}, c = f.comms || {}, rc = f.roll_call || {}, rep = r.report || {};
+  const writing = rep.automatic && r.scribe_writing;
+  const pct = c.reply_rate == null ? "–" : `${Math.round(c.reply_rate * 100)}%`;
+  const rows = [["Alerted", c.alerted ?? 0], ["Replied", `${c.replied ?? 0} · ${pct}`], ["Median first reply", c.median_reply_secs == null ? "–" : `${c.median_reply_secs}s`],
+    ["Confirmed out", rc.confirmed_safe ?? 0], ["Needed help", rc.needs_help ?? 0], ["Unconfirmed at the end", rc.unconfirmed ?? 0],
+    ["Texts in / out", `${c.texts_in ?? 0} / ${c.texts_out ?? 0}`], ["Calls · to dispatcher", `${c.calls ?? 0} · ${c.transfers ?? 0}`],
+    ...(f.exits_used || []).map((x) => [`Out via ${shortLabel(x.label)}`, x.out])];
+  const src = f.sources || {};
+  $("drawer").innerHTML = `<div class="dh"><div class="badges"><span class="pb" style="background:#3fbf7f">${esc(ev.mode.toUpperCase())} ENDED</span>
+      <button class="x" onclick="closeReport()" aria-label="Close">✕</button></div>
+      <h2>After-action: fire in ${esc(shortLabel(ev.origin_label) || "the building")}</h2>
+      <div class="m">${f.minutes != null ? `${f.minutes} min · ` : ""}started ${hhmmss(ev.started_at)}${ev.ended_at ? ` · ended ${hhmmss(ev.ended_at)}` : ""}</div></div>
+    <div class="scroll">
+      <div class="block" style="gap:18px"><div class="caps" style="color:var(--accent)">CREAO AFTER-ACTION REPORT</div>
+        <div class="sec"><div class="top"><b>${writing ? "Incident Scribe is writing…" : rep.automatic ? "Aria draft" : "Incident Scribe"}</b><span>${esc(rep.by || "")}${rep.at ? " · " + hhmmss(rep.at) : ""}</span></div>
+          <div class="tx">${esc(rep.text || "No report yet.")}</div></div>
+      </div>
+      <div class="block tl" style="border-bottom:0"><div class="caps" style="color:rgba(255,255,255,.4)">FROM TIGERDATA · ${esc(src.comms || "comms_events")} · ${esc(src.exit_flow || "evac_events")}</div>
+        ${rows.map(([l, v]) => `<div class="row"><span class="other" style="flex:1">${esc(l)}</span><span class="tm" style="color:#fff">${esc(String(v))}</span></div>`).join("")}
+      </div>
+    </div>
+    <div class="dfoot"><button class="btn solid" onclick="window.open('/live/buildings/${S.b}/after-action.md','_blank','noopener')">Open as Markdown</button>
+      <button class="btn" onclick="closeReport()">Close</button></div>`;
+  $("drawer").classList.add("open");
+  if (!quiet) render();
+}
+Object.assign(window, { openAfterAction });
 const act = (what, unit) => post(`/live/incidents/${S.open}/${what}`, { unit });
 function assign() { const u = prompt("Unit or crew sent (e.g. Engine 7)"); if (u) act("assign", u); }
 Object.assign(window, { openReport, closeReport, act, assign, decide, joinHandoff, resolveHandoff, assignCrew, retext, callPeople });

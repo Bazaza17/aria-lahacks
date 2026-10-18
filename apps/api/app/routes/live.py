@@ -50,6 +50,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.creao import (
+    after_action,
     agents,
     bridge,
     brief,
@@ -510,8 +511,79 @@ async def incidents(building_id: str, session: Session) -> list[dict]:
 async def get_situation(building_id: str, session: Session, privileged: Privileged) -> dict:
     building = _building(building_id)
     await _expire_drill(session, building.id)
-    out = await _out(session, privileged, building.id, await situation.build(session, building))
+    s = await situation.build(session, building)
+    if s["evacuation"] is None:  # what the idle console offers: Clear, and the last report
+        s["leftovers"] = await after_action.has_leftovers(session, building.id)
+        last = await after_action.latest_ended(session, building.id)
+        s["last_evacuation"] = (
+            {
+                "id": last.id,
+                "mode": last.mode,
+                "origin_label": last.origin_label,
+                "ended_at": last.ended_at.isoformat() if last.ended_at else None,
+                "after_action": bool((last.report or {}).get("after_action")),
+            }
+            if last
+            else None
+        )
+    out = await _out(session, privileged, building.id, s)
     return {**out, "viewer": "dispatcher" if privileged else "public"}
+
+
+@router.post("/buildings/{building_id}/clear")
+@limiter.limit("10/minute")
+async def clear_console(
+    request: Request, building_id: str, session: Session, privileged: Privileged
+) -> dict:
+    """With nothing running: close leftover incidents, hazards and roll-call states (open, like drills;
+    after a live evacuation only the dispatcher key may clear)."""
+    building = _building(building_id)
+    await _expire_drill(session, building.id)
+    if await plan.active_evacuation(session, building.id):
+        raise HTTPException(409, "End the evacuation first; ending it clears the console")
+    last = await after_action.latest_ended(session, building.id)
+    if last and last.mode == "live" and not privileged:
+        raise HTTPException(401, "Dispatcher key required to clear after a live evacuation")
+    await after_action.clear(session, building.id, "console cleared")
+    await hub.publish("console.cleared", building_id=building.id, data={})
+    return {"cleared": True}
+
+
+@router.get("/buildings/{building_id}/after-action")
+async def get_after_action(building_id: str, session: Session, privileged: Privileged) -> dict:
+    """The last ended drill or fire: the CREAO Scribe's after-action report (Aria's TigerData draft
+    until it lands), and the facts it was written from."""
+    building = _building(building_id)
+    ev = await after_action.latest_ended(session, building.id)
+    if ev is None:
+        raise HTTPException(404, "No drill or fire has ended here yet")
+    rep = ev.report or {}
+    out = {
+        "evacuation": {
+            **situation.evacuation_out(ev, building),
+            "ended_at": ev.ended_at.isoformat() if ev.ended_at else None,
+        },
+        "title": after_action.TITLE,
+        "report": rep.get("after_action"),
+        "facts": rep.get("after_action_facts"),
+        "scribe_writing": bool(rep.get("after_action", {}).get("automatic"))
+        and "scribe" in bridge.deployed(),
+    }
+    return await _out(session, privileged, building.id, out)
+
+
+@router.get("/buildings/{building_id}/after-action.md", response_class=PlainTextResponse)
+async def get_after_action_md(building_id: str, session: Session, privileged: Privileged) -> str:
+    r = await get_after_action(building_id, session, privileged)
+    ev, rep, f = r["evacuation"], r["report"] or {}, r["facts"] or {}
+    src = f.get("sources") or {}
+    return (
+        f"# {r['title']}: {r['evacuation'].get('origin_label') or 'evacuation'}\n\n"
+        f"**{ev['mode'].upper()}** · started {ev['started_at'][:19]} UTC · ended "
+        f"{(ev.get('ended_at') or '')[:19]} UTC\n\n{rep.get('text', '')}\n\n_{rep.get('by', '')}_\n\n"
+        f"Data: TigerData ({src.get('comms', 'comms_events')}, {src.get('exit_flow', 'evac_events')}, "
+        "incident_events)\n"
+    )
 
 
 @router.get("/buildings/{building_id}/flow")

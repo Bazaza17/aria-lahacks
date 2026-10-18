@@ -66,8 +66,8 @@ HOW_TO = (
     "Aria runs these for you after your reply (run_id is added for you). Tools: "
     "handoff_to_agent {role: intake|coordinator|accountability|liaison|scribe, task} (Commander only); "
     "propose_route {zone, to_exit, rationale}; report_hazard {place, category: fire_hazard|blocked|"
-    "violence, text}; update_report {section: overview|hazards|routes|people|responders|timeline, "
-    "text}; request_handoff {incident_id, reason}; request_call {phone, reason}; add_note "
+    "violence, text}; update_report {section: overview|hazards|routes|people|responders|timeline|"
+    "after_action, text};request_handoff {incident_id, reason}; request_call {phone, reason}; add_note "
     "{incident_id, text}; complete_task {summary}. Use only ids, zones, exits and phones that appear "
     "in snapshot. Use [] when nothing needs doing."
 )

@@ -283,7 +283,9 @@ async def propose_route(
 )
 async def update_report(
     run_id: str,
-    section: Literal["overview", "hazards", "routes", "people", "responders", "timeline"],
+    section: Literal[
+        "overview", "hazards", "routes", "people", "responders", "timeline", "after_action"
+    ],
     text: str,
 ) -> dict[str, Any]:
     async with sessions()() as session:
@@ -300,7 +302,12 @@ async def update_report(
         except LookupError as e:
             return {"error": str(e)}
         await agents.record_action(
-            session, run, "report", f"Updated the {report.SECTIONS[section][0].lower()} section"
+            session,
+            run,
+            "report",
+            "Wrote the after-action report"
+            if section == "after_action"
+            else f"Updated the {report.SECTIONS[section][0].lower()} section",
         )
         return {"updated": section}
 

@@ -163,12 +163,19 @@ async def build(session: AsyncSession, building: Building) -> dict[str, Any]:
 async def write(
     session: AsyncSession, building: Building, section: str, text: str, *, role: str, by: str
 ) -> dict:
-    ev = await plan.active_evacuation(session, building.id)
+    if section == "after_action":  # the Scribe writes it once the evacuation has ended
+        from app.creao.after_action import latest_ended
+
+        ev = await plan.active_evacuation(session, building.id) or await latest_ended(
+            session, building.id
+        )
+    else:
+        ev = await plan.active_evacuation(session, building.id)
     if ev is None:
         raise LookupError("no active evacuation")
     ev.report = {
         **(ev.report or {}),
-        section: {"text": text[:4000], "role": role, "by": by, "at": utcnow().isoformat()},
+        section: {"text": text[:8000], "role": role, "by": by, "at": utcnow().isoformat()},
     }
     await session.commit()
     await hub.publish(

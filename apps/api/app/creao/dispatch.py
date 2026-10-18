@@ -152,7 +152,24 @@ async def start(
 
 
 async def end(session: AsyncSession, ev: Evacuation) -> None:
+    """End it, keep an after-action draft read from TigerData, clear the console, brief the Scribe."""
+    from app.creao import after_action
+
+    building = get_building(ev.building_id)
+    facts = await after_action.freeze(session, building, ev) if building else None
     ev.status, ev.ended_at = "ended", utcnow()
+    if facts:
+        ev.report = {
+            **(ev.report or {}),
+            "after_action_facts": facts,
+            "after_action": {
+                "text": after_action.draft(facts),
+                "role": "aria",
+                "by": "Aria (automatic, from TigerData)",
+                "at": utcnow().isoformat(),
+                "automatic": True,
+            },
+        }
     await session.execute(
         update(RouteProposal)
         .where(
@@ -161,7 +178,14 @@ async def end(session: AsyncSession, ev: Evacuation) -> None:
         .values(status=ProposalStatus.stale)
     )
     await session.commit()
-    await hub.publish("evacuation.ended", building_id=ev.building_id, data={"evacuation_id": ev.id})
+    await after_action.clear(session, ev.building_id, f"{ev.mode} ended")
+    await hub.publish(
+        "evacuation.ended",
+        building_id=ev.building_id,
+        data={"evacuation_id": ev.id, "after_action": bool(facts)},
+    )
+    if facts:
+        after_action.brief_scribe(ev.building_id, facts)
 
 
 async def set_fire_model(session: AsyncSession, building: Building, model: dict) -> dict:

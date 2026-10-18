@@ -208,3 +208,46 @@ async def test_public_actions_need_a_running_drill_and_call_once(client):
 async def test_route_proposals_open_to_the_public(client):
     r = await client.get(f"/live/buildings/{VENUE}/route-proposals")
     assert r.status_code == 200 and r.json() == []
+
+
+async def test_ending_a_drill_clears_the_console_and_keeps_an_after_action_report(client):
+    ev_id = (await _declare(client)).json()["evacuation"]["id"]
+    text = {
+        "eventId": "t1",
+        "eventType": "sms.received",
+        "payload": {"phone": PHONE, "text": "I'm trapped, smoke in the galleria"},
+    }
+    assert (await client.post("/live/intake/events", json=text, headers=TOOL)).status_code == 200
+    busy = (await client.get(f"/live/buildings/{VENUE}/situation", headers=DISPATCHER)).json()
+    assert any(i["status"] == "active" for i in busy["incidents"])
+
+    assert (await client.post(f"/live/evacuations/{ev_id}/end", json={})).json() == {"ended": True}
+    s = (await client.get(f"/live/buildings/{VENUE}/situation", headers=DISPATCHER)).json()
+    assert s["evacuation"] is None and s["leftovers"] is False
+    assert not [i for i in s["incidents"] if i["status"] == "active"] and not s["hazards"]
+    assert s["people"][0]["status"] == "unconfirmed" and s["roll_call"]["total"] == 1
+    assert s["last_evacuation"]["id"] == ev_id and s["last_evacuation"]["after_action"]
+
+    r = (await client.get(f"/live/buildings/{VENUE}/after-action")).json()
+    assert r["report"]["automatic"] and "DRILL" in r["report"]["text"]
+    assert r["facts"]["comms"]["alerted"] == 1 and r["facts"]["incidents"]["total"] >= 1
+    assert PHONE not in str(r)
+    md = (await client.get(f"/live/buildings/{VENUE}/after-action.md")).text
+    assert md.startswith("# After-action report") and "TigerData" in md
+
+
+async def test_clear_closes_leftovers_with_nothing_running(client):
+    text = {
+        "eventId": "t2",
+        "eventType": "sms.received",
+        "payload": {"phone": PHONE, "text": "smoke by the galleria door"},
+    }
+    assert (await client.post("/live/intake/events", json=text, headers=TOOL)).status_code == 200
+    assert (await client.get(f"/live/buildings/{VENUE}/situation")).json()["leftovers"] is True
+    assert (await client.post(f"/live/buildings/{VENUE}/clear", json={})).json() == {
+        "cleared": True
+    }
+    assert (await client.get(f"/live/buildings/{VENUE}/situation")).json()["leftovers"] is False
+    # nothing to clear mid-evacuation: ending it clears
+    await _declare(client)
+    assert (await client.post(f"/live/buildings/{VENUE}/clear", json={})).status_code == 409
