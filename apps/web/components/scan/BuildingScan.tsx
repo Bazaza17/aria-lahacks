@@ -20,16 +20,21 @@ import {
   type ScanHazardPin,
 } from "@/lib/scan-hazard-pins";
 import { hasEvacPlan, openExitCount, resolveEvacPlan } from "@/lib/scan-evac-paths";
-import { hasFloodProfile, waterSurfaceNy } from "@/lib/scan-flood";
+import {
+  formatClock,
+  frameAt,
+  latestEvent,
+  loadFireTimeline,
+  type FireTimeline,
+} from "@/lib/scan-fire";
 
 import { HazardPinFilter } from "./HazardPinFilter";
 import { ScanViewToolbar } from "./ScanViewToolbar";
 import {
   buildEvacLayer,
-  buildFloodLayer,
-  lerpFloodY,
+  buildFireLayer,
   type EvacLayerObjects,
-  type FloodLayerObjects,
+  type FireLayerObjects,
 } from "./scanSceneLayers";
 
 export type ScanViewMode = "default" | "evac" | "hazards";
@@ -48,7 +53,12 @@ const SCANS: Record<string, string | undefined> = {
   "014b39a9-09b8-432b-9b62-363e06383d1f": "/scans/building_a/scan.usdz",
   "870d979d-6eaf-4d7f-894a-8ca34e527237": "/scans/building_b/scan.usdz",
   "e5a3fddc-e22c-431c-a5d3-ee29ef8604d1": storageUrl("scans/the_dock/scan.usdz"),
+  // Local preview (/fire-preview); the GLB is gitignored under public/scans.
+  venue: "/scans/venue/scan.glb",
 };
+
+// Scan floor height in GLB coordinates, if the timeline doesn't give one.
+const DEFAULT_FLOOR_Y = -0.85;
 
 const PIN_REVEAL_MS = 180;
 const SEVERITY_GLOW: Record<string, number> = {
@@ -66,8 +76,9 @@ type SceneBundle = {
   controls: OrbitControls;
   pinRoot: THREE.Group;
   evacRoot: THREE.Group;
-  floodRoot: THREE.Group;
+  fireRoot: THREE.Group;
   meshSize: THREE.Vector3;
+  meshCenter: THREE.Vector3;
   dispose: () => void;
 };
 
@@ -85,13 +96,13 @@ export function BuildingScan({
   const sceneRef = useRef<SceneBundle | null>(null);
   const pinObjectsRef = useRef<THREE.Object3D[]>([]);
   const evacLayerRef = useRef<EvacLayerObjects | null>(null);
-  const floodLayerRef = useRef<FloodLayerObjects | null>(null);
+  const fireLayerRef = useRef<FireLayerObjects | null>(null);
   const animatedPinIdsRef = useRef(new Set<string>());
   const viewModeRef = useRef<ScanViewMode>("default");
-  const waterNyRef = useRef<number | null>(null);
 
   const { report, running } = useAgentRun();
-  const { surge } = useScenario();
+  const { surge, fireTime } = useScenario();
+  const [fireTimeline, setFireTimeline] = useState<FireTimeline | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [interacted, setInteracted] = useState(false);
@@ -122,12 +133,18 @@ export function BuildingScan({
     });
   }, [buildingId, surge, loaded]);
 
-  const waterNy = useMemo(
-    () => (hasFloodProfile(buildingId) ? waterSurfaceNy(buildingId, surge) : null),
-    [buildingId, surge],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    setFireTimeline(null);
+    void loadFireTimeline(buildingId).then((t) => {
+      if (!cancelled) setFireTimeline(t);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [buildingId]);
 
-  waterNyRef.current = waterNy;
+  const fireEvent = fireTimeline ? latestEvent(fireTimeline, fireTime) : null;
 
   useEffect(() => {
     if (!report || allPins.length === 0) {
@@ -213,8 +230,8 @@ export function BuildingScan({
 
       const pinRoot = new THREE.Group();
       const evacRoot = new THREE.Group();
-      const floodRoot = new THREE.Group();
-      scene.add(floodRoot, evacRoot, pinRoot);
+      const fireRoot = new THREE.Group();
+      scene.add(fireRoot, evacRoot, pinRoot);
 
       const isGltf = /\.(glb|gltf)(\?|$)/i.test(scanUrl);
       try {
@@ -265,18 +282,19 @@ export function BuildingScan({
           controls,
           pinRoot,
           evacRoot,
-          floodRoot,
+          fireRoot,
           meshSize: size.clone(),
+          meshCenter: center.clone(),
           dispose: () => {
             cancelAnimationFrame(raf);
             ro.disconnect();
             evacLayerRef.current?.dispose();
-            floodLayerRef.current?.dispose();
+            fireLayerRef.current?.dispose();
             controls.dispose();
             renderer.dispose();
             pinRoot.clear();
             evacRoot.clear();
-            floodRoot.clear();
+            fireRoot.clear();
             scene.clear();
             if (renderer.domElement.parentNode === mount) {
               mount.removeChild(renderer.domElement);
@@ -313,23 +331,6 @@ export function BuildingScan({
 
       const tick = () => {
         controls.update();
-        if (
-          floodLayerRef.current &&
-          waterNyRef.current !== null &&
-          viewModeRef.current === "evac" &&
-          sceneRef.current
-        ) {
-          lerpFloodY(
-            floodLayerRef.current.mesh,
-            waterNyRef.current,
-            {
-              x: sceneRef.current.meshSize.x,
-              y: sceneRef.current.meshSize.y,
-              z: sceneRef.current.meshSize.z,
-            },
-            0.12,
-          );
-        }
         renderer.render(scene, camera);
         labelRenderer.render(scene, camera);
         raf = requestAnimationFrame(tick);
@@ -348,7 +349,7 @@ export function BuildingScan({
       cleanupScene?.();
       pinObjectsRef.current = [];
       evacLayerRef.current = null;
-      floodLayerRef.current = null;
+      fireLayerRef.current = null;
       while (mount.firstChild) mount.removeChild(mount.firstChild);
     };
   }, [scanUrl]);
@@ -382,29 +383,28 @@ export function BuildingScan({
     evacLayerRef.current = layer;
   }, [buildingId, surge, loaded, viewMode]);
 
-  // Flood water plane (evac mode + surge > 0)
+  // Fire layer: built once per timeline, updated as fireTime changes
   useEffect(() => {
     const bundle = sceneRef.current;
-    if (!bundle || !loaded || viewMode !== "evac") {
-      floodLayerRef.current?.dispose();
-      floodLayerRef.current = null;
-      bundle?.floodRoot.clear();
-      return;
-    }
+    if (!bundle || !loaded || !fireTimeline) return;
+    const layer = buildFireLayer(
+      fireTimeline,
+      bundle.meshCenter,
+      fireTimeline.scan.floor_y ?? DEFAULT_FLOOR_Y,
+    );
+    bundle.fireRoot.add(layer.group);
+    fireLayerRef.current = layer;
+    return () => {
+      bundle.fireRoot.remove(layer.group);
+      layer.dispose();
+      if (fireLayerRef.current === layer) fireLayerRef.current = null;
+    };
+  }, [loaded, fireTimeline]);
 
-    floodLayerRef.current?.dispose();
-    bundle.floodRoot.clear();
-
-    if (waterNy === null) return;
-
-    const layer = buildFloodLayer(waterNy, {
-      x: bundle.meshSize.x,
-      y: bundle.meshSize.y,
-      z: bundle.meshSize.z,
-    });
-    bundle.floodRoot.add(layer.mesh);
-    floodLayerRef.current = layer;
-  }, [buildingId, surge, waterNy, loaded, viewMode]);
+  useEffect(() => {
+    if (!fireTimeline) return;
+    fireLayerRef.current?.update(frameAt(fireTimeline, fireTime));
+  }, [fireTimeline, fireTime, loaded]);
 
   // Hazard pins (hazards mode only)
   useEffect(() => {
@@ -480,6 +480,12 @@ export function BuildingScan({
               {pinBadge}
             </span>
           )}
+          {fireTimeline && (
+            <span className="text-[#ffb27a]">
+              FIRE T+{formatClock(fireTime)}
+              {fireEvent ? ` · ${fireEvent.detail.toUpperCase()}` : ""}
+            </span>
+          )}
           {viewMode === "evac" && evacPlan && (
             <span className="text-emerald-300/90">
               EVAC · {evacOpen}/{evacTotal} OPEN
@@ -519,7 +525,6 @@ export function BuildingScan({
             buildingId={buildingId}
             evacOpenCount={evacOpen}
             evacTotal={evacTotal}
-            surgeActive={surge > 0}
           />
         )}
 
@@ -538,7 +543,6 @@ export function BuildingScan({
             pinCount={viewMode === "hazards" ? allPins.length : 0}
             revealedCount={revealedCount}
             evacPlan={viewMode === "evac" ? evacPlan : null}
-            surge={surge}
           />
         )}
 
@@ -621,13 +625,11 @@ function ScanMetadata({
   pinCount,
   revealedCount,
   evacPlan,
-  surge,
 }: {
   vertexCount: number | null;
   pinCount: number;
   revealedCount: number;
   evacPlan: ReturnType<typeof resolveEvacPlan> | null;
-  surge: number;
 }) {
   const vertsLabel = vertexCount
     ? vertexCount >= 1_000_000
@@ -643,10 +645,7 @@ function ScanMetadata({
         <Row label="HAZARDS" value={`${Math.min(revealedCount, pinCount)}/${pinCount} INDEXED`} />
       )}
       {evacPlan && (
-        <>
-          <Row label="EVAC" value={`${openExitCount(evacPlan)}/${evacPlan.exits.length} EXITS`} />
-          {surge > 0 && <Row label="SURGE" value={`${surge} FT · WATER ACTIVE`} />}
-        </>
+        <Row label="EVAC" value={`${openExitCount(evacPlan)}/${evacPlan.exits.length} EXITS`} />
       )}
       <Row label="ACCURACY" value="±5CM" />
     </div>
