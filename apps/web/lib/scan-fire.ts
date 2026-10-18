@@ -1,5 +1,7 @@
-// Fire timeline from packages/engine, drawn over the scan.
-// Produced by: cd packages/engine && python -m engine.fire > ../../apps/web/public/fire/venue.json
+// Fire timeline from packages/engine, drawn over the scan. Live: the API runs the engine
+// (GET /engine/viewer?start=…, proxied by next.config.ts). Fallback file for the default start:
+// cd packages/engine && uv run python -m engine.demo --start 140 --frame-step 10 \
+//   --departures 0,60,120,180,240,300,420 --viewer-out ../../apps/web/public/fire/venue.json
 
 export type FireRoomState = "clear" | "smoke" | "untenable" | "burning" | "flashover" | "burnt_out";
 
@@ -69,22 +71,57 @@ export type FireTimeline = {
   routes?: { departures: FireRouteDeparture[] };
 };
 
-// The venue's Supabase row id, if known; it then uses public/fire/venue.json.
+// The venue's Supabase row id, if known; the engine runs for it (and public/fire/venue.json is
+// the fallback for the default start).
 const VENUE_BUILDING_ID = process.env.NEXT_PUBLIC_VENUE_BUILDING_ID;
 
+function isVenue(buildingId: string): boolean {
+  return buildingId === "venue" || buildingId === VENUE_BUILDING_ID;
+}
+
 export function fireTimelineUrl(buildingId: string): string {
-  const key = buildingId === VENUE_BUILDING_ID ? "venue" : buildingId;
+  const key = isVenue(buildingId) ? "venue" : buildingId;
   return `/fire/${encodeURIComponent(key)}.json`;
 }
 
-export async function loadFireTimeline(buildingId: string): Promise<FireTimeline | null> {
+/** A space the engine can start a fire in (GET /engine/starts). */
+export type FireStart = {
+  id: string;
+  name: string;
+  storey: string | null;
+  kind: string | null;
+  occupant_load: number;
+};
+
+export type FireStarts = { default: string; starts: FireStart[] };
+
+async function fetchJson<T>(url: string): Promise<T | null> {
   try {
-    const res = await fetch(fireTimelineUrl(buildingId));
+    const res = await fetch(url);
     if (!res.ok) return null;
-    return (await res.json()) as FireTimeline;
+    return (await res.json()) as T;
   } catch {
     return null;
   }
+}
+
+/** The venue's possible fire starts, from the API's engine (proxied at /engine). */
+export async function loadFireStarts(buildingId: string): Promise<FireStarts | null> {
+  return isVenue(buildingId) ? fetchJson<FireStarts>("/engine/starts") : null;
+}
+
+/** The engine's run for this start, live from the API; for the default start the committed
+ *  public/fire file stands in when the API is down. */
+export async function loadFireTimeline(
+  buildingId: string,
+  start?: string,
+): Promise<FireTimeline | null> {
+  if (isVenue(buildingId)) {
+    const query = start ? `?start=${encodeURIComponent(start)}` : "";
+    const live = await fetchJson<FireTimeline>(`/engine/viewer${query}`);
+    if (live || start) return live;
+  }
+  return fetchJson<FireTimeline>(fireTimelineUrl(buildingId));
 }
 
 export function frameAt(timeline: FireTimeline, tS: number): FireFrame {
