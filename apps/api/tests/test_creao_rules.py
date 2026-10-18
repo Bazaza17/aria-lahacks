@@ -77,3 +77,28 @@ def test_console_opens_on_the_venue(monkeypatch, configured) -> None:
     )
     assert buildings.default_building().name == "James West Alumni Center"
     assert [b.name for b in buildings.all_buildings().values()] == ["James West Alumni Center"]
+
+
+def test_listen_dsn_uses_sslmode(monkeypatch) -> None:
+    """Tiger Cloud URLs carry ?ssl=require (SQLAlchemy); the raw asyncpg LISTEN needs sslmode."""
+    import asyncio
+
+    from sqlalchemy.engine import make_url
+
+    from app.creao import hub
+
+    url = make_url("postgresql+asyncpg://u:p@db.example.com:5432/tsdb?ssl=require")
+    monkeypatch.setattr(hub, "engine", lambda: type("E", (), {"url": url})())
+    seen = {}
+
+    async def fake_listen(dsn):
+        seen["dsn"] = dsn
+
+    monkeypatch.setattr(hub, "_listen_forever", fake_listen)
+
+    async def run():
+        await hub.start()
+        await hub._listener
+
+    asyncio.run(run())
+    assert seen["dsn"] == "postgresql://u:p@db.example.com:5432/tsdb?sslmode=require"

@@ -116,7 +116,12 @@ async def start() -> None:
     if url.get_backend_name() != "postgresql":
         return
     state["backend"] = "tigerdata"
-    dsn = url.set(drivername="postgresql").render_as_string(hide_password=False)
+    # ?ssl=require is SQLAlchemy's asyncpg spelling; a raw asyncpg DSN only knows libpq's sslmode and
+    # sends ssl to the server as a setting, which Tiger Cloud refuses (no LISTEN, so no live events)
+    query = dict(url.query)
+    if "ssl" in query and "sslmode" not in query:
+        query["sslmode"] = query.pop("ssl")
+    dsn = url.set(drivername="postgresql", query=query).render_as_string(hide_password=False)
     _listener = asyncio.create_task(_listen_forever(dsn), name="tigerdata-listen")
 
 
