@@ -102,3 +102,57 @@ def test_listen_dsn_uses_sslmode(monkeypatch) -> None:
 
     asyncio.run(run())
     assert seen["dsn"] == "postgresql://u:p@db.example.com:5432/tsdb?sslmode=require"
+
+
+REPLY = {
+    "runId": "creao-1",
+    "status": "completed",
+    "result": {
+        "text": '{"handoffs_sent": 2}',
+        "chatText": "Dispatched the coordinator.\n```aria-actions\n"
+        '[{"tool": "complete_task", "args": {"summary": "done"}},'
+        ' {"tool": "handoff_to_agent", "args": {"role": "coordinator", "task": "route around it", "run_id": "fake"}},'
+        ' {"tool": "update_report", "args": {"section": "overview", "text": "1 hazard", "extra": 1}},'
+        ' {"tool": "drop_tables", "args": {}}]\n```',
+    },
+}
+
+
+def test_creao_reply_actions_are_parsed() -> None:
+    from app.creao import bridge
+
+    tools = [a["tool"] for a in bridge.parse_actions(REPLY)]
+    assert tools == ["complete_task", "handoff_to_agent", "update_report", "drop_tables"]
+    assert bridge.parse_actions({"result": {"chatText": "no block here"}}) == []
+    assert bridge._text({"a": [1]}) == '{"a":[1]}' and bridge._text("x") == "x"
+
+
+@pytest.mark.parametrize("role", ["commander", "scribe"])
+def test_creao_reply_actions_run_as_mcp_would(monkeypatch, role) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.creao import bridge
+    from app.creao import mcp as tools
+
+    calls = []
+
+    def fake(name):
+        async def fn(run_id, **kw):
+            calls.append((name, run_id, kw))
+            return {"ok": name}
+
+        fn.__signature__ = __import__("inspect").signature(getattr(tools, name))
+        return fn
+
+    for name in ("complete_task", "handoff_to_agent", "update_report"):
+        monkeypatch.setattr(tools, name, fake(name))
+    run = SimpleNamespace(id="aria-run-7", role=role)
+    out = asyncio.run(bridge.apply_actions(run, REPLY))
+
+    assert all(rid == "aria-run-7" for _n, rid, _kw in calls)  # never the agent's own run_id
+    assert calls[-1][0] == "complete_task"  # finishing goes last
+    assert ("update_report", "aria-run-7", {"section": "overview", "text": "1 hazard"}) in calls
+    assert {"tool": "drop_tables", "error": "not an Aria tool"} in out
+    handed = any(n == "handoff_to_agent" for n, _r, _k in calls)
+    assert handed is (role == "commander")  # only the Commander hands off

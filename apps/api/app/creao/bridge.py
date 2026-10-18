@@ -12,13 +12,22 @@ Incident Commander's API Trigger with the new events and a snapshot read from Ti
 The Commander hands tasks to specialists with the handoff_to_agent MCP tool, which comes back
 here (trigger_role). Critical events (a declared fire, a caller's first handoff) skip the batch.
 The staff's own actions never wake the staff again, so there are no loops.
+
+CREAO can't attach a custom MCP connector to an agent, so the staff act through their reply too:
+each run ends with an `aria-actions` block (a JSON list of tool calls), and when CREAO's callback
+arrives apply_actions() runs them through the same tool functions /mcp serves. Inputs go as text
+(CREAO's form fields are strings; objects arrive as "[object Object]").
 """
 
 import asyncio
 import contextlib
+import inspect
+import json
 import logging
+import re
 import time
 from collections import defaultdict
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -47,6 +56,86 @@ ROUTE_BY_EVENT = {  # with no Commander deployed, events go straight to the owne
     "route.approved": "scribe",
     "route.rejected": "scribe",
 }
+
+
+# What every run is told about acting. Tool calls come back in the reply (see apply_actions).
+HOW_TO = (
+    "Aria's tools are not a CREAO connector here, so don't look for one. Read snapshot and new_events "
+    "(JSON text), decide, and end your reply with exactly one block:\n"
+    '```aria-actions\n[{"tool": "update_report", "args": {"section": "overview", "text": "..."}}]\n```\n'
+    "Aria runs these for you after your reply (run_id is added for you). Tools: "
+    "handoff_to_agent {role: intake|coordinator|accountability|liaison|scribe, task} (Commander only); "
+    "propose_route {zone, to_exit, rationale}; report_hazard {place, category: fire_hazard|blocked|"
+    "violence, text}; update_report {section: overview|hazards|routes|people|responders|timeline, "
+    "text}; request_handoff {incident_id, reason}; request_call {phone, reason}; add_note "
+    "{incident_id, text}; complete_task {summary}. Use only ids, zones, exits and phones that appear "
+    "in snapshot. Use [] when nothing needs doing."
+)
+ACTION_TOOLS = (
+    "handoff_to_agent",
+    "propose_route",
+    "report_hazard",
+    "update_report",
+    "request_handoff",
+    "request_call",
+    "add_note",
+    "complete_task",
+)
+MAX_ACTIONS = 12
+_BLOCK = re.compile(r"```aria-actions\s*(.*?)```", re.DOTALL)
+_JSON_BLOCK = re.compile(r"```(?:json)?\s*(\[\s*\{.*?\}\s*\])\s*```", re.DOTALL)
+
+
+def _text(value: Any) -> Any:
+    """CREAO's form fields are strings: send objects and lists as JSON text."""
+    if value is None or isinstance(value, str):
+        return value
+    return json.dumps(value, separators=(",", ":"), default=str)
+
+
+def parse_actions(body: dict) -> list[dict]:
+    """The aria-actions list from a CREAO callback (result.chatText or result.text)."""
+    result = body.get("result") if isinstance(body.get("result"), dict) else body
+    for key in ("chatText", "text"):
+        reply = result.get(key) if isinstance(result, dict) else None
+        if not isinstance(reply, str):
+            continue
+        for pattern in (_BLOCK, _JSON_BLOCK):
+            for raw in pattern.findall(reply):
+                try:
+                    actions = json.loads(raw.strip())
+                except ValueError:
+                    continue
+                if isinstance(actions, list):
+                    return [a for a in actions if isinstance(a, dict) and a.get("tool")]
+    return []
+
+
+async def apply_actions(run: AgentRun, body: dict) -> list[dict]:
+    """Run the agent's tool calls from its reply, as /mcp would; complete_task goes last."""
+    from app.creao import mcp
+
+    actions = parse_actions(body)[:MAX_ACTIONS]
+    actions.sort(key=lambda a: a.get("tool") == "complete_task")
+    done = []
+    for action in actions:
+        name, args = action.get("tool"), action.get("args") or {}
+        if name not in ACTION_TOOLS or not isinstance(args, dict):
+            done.append({"tool": name, "error": "not an Aria tool"})
+            continue
+        if name == "handoff_to_agent" and run.role != "commander":
+            done.append({"tool": name, "error": "only the Commander hands off"})
+            continue
+        fn = getattr(mcp, name)
+        accepted = set(inspect.signature(fn).parameters) - {"run_id"}
+        try:
+            out = await fn(run_id=run.id, **{k: v for k, v in args.items() if k in accepted})
+            done.append({"tool": name, "ok": True, "result": out})
+        except Exception as e:  # noqa: BLE001 (one bad call must not drop the rest)
+            done.append({"tool": name, "error": str(e)[:200]})
+    if done:
+        log.info("CREAO %s run %s: ran %d action(s)", run.role, run.id, len(done))
+    return done
 
 
 def deployed() -> dict[str, dict[str, str]]:
@@ -179,15 +268,14 @@ async def trigger_role(
         "role_title": agents.ROLES[role]["title"],
         "task": task,
         "building_id": building_id,
-        "snapshot": snap,
-        "staff": [
-            {"role": r, "title": m["title"], "does": m["does"], "deployed": r in staff}
+        "snapshot": _text(snap),
+        "staff": ", ".join(
+            f"{r} ({m['title']}: {m['does']})"
             for r, m in agents.ROLES.items()
-            if r != "commander"
-        ],
-        "how_to": "Use the incident-dispatch MCP tools. Pass run_id to every write tool. Hand work to a "
-        "specialist with handoff_to_agent. Finish with complete_task(run_id, summary).",
-        **(extra or {}),
+            if r != "commander" and r in staff
+        ),
+        "how_to": HOW_TO,
+        **{k: _text(v) for k, v in (extra or {}).items()},
     }
     creao_run_id, error = await _post(role, inputs, run.id)
     async with sessions()() as session:
