@@ -41,7 +41,7 @@ General:
 CREAO (entered):
 
 - [x] **01 Build the agent on agent.creao.ai.** Six agents, built and running (`docs/creao-layer.md`, "Agent links").
-- [ ] **02 README: agent ID + run share link.** Commander agent ID `ef349685-a692-4a0d-ae20-eb2e1f524624`. The share link comes from the CREAO app (the owner clicks Share on a run); until then the docs carry the placeholder `CREAO_RUN_SHARE_LINK`. Check that the ID on the agent's page matches, and that the shared run shows no phone numbers. A run from during a drill is better than one after End.
+- [x] **02 README: agent ID + run share link.** Commander agent ID `ef349685-a692-4a0d-ae20-eb2e1f524624`; run share link https://agent.creao.ai/share/46bf0fc2477da75e00d139e9eafbfb0e. Check that the ID on the agent's page matches, and that the shared run shows no phone numbers. A run from during a drill is better than one after End.
 - [ ] **03 Show the agent running in the demo.** The console's CREAO strip and "Show agent steps" (the same run id as the CREAO run page), a route proposal approved, the after-action report, and a short cut to the run on agent.creao.ai.
 - [ ] Pick the CREAO prize category (Disruptor, One-Person Company or Team Empowerment) on Devpost.
 

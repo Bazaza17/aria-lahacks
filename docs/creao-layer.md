@@ -269,7 +269,7 @@ all six (each answered a test run), so one `CREAO_API_KEY` is enough.
 The Agent ID is the id in `/install/<id>`, the same id the API Trigger uses (`CREAO_APP_<ROLE>`).
 Check it against the ID shown on each agent's page before submitting.
 
-Run share link (Incident Commander): CREAO_RUN_SHARE_LINK · CREAO run id `e3b669dc-2e26-4529-a669-db8e787a160d`
+Run share link (Incident Commander): https://agent.creao.ai/share/46bf0fc2477da75e00d139e9eafbfb0e · Aria run id `fb19956e68d744059d8773a3c300a26e`
 
 The live API lists every run and action the staff took (public, phone numbers masked):
 `GET https://aria-lahacks-production.up.railway.app/live/buildings/547b5ec5-30c5-4f76-8080-012a52e90bd9/staff`.

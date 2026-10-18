@@ -20,8 +20,8 @@ Built at LA Hacks 2026 (Sat Oct 17 – Sun Oct 18) by Lincoln, Aayush Pal and Sa
 - **CREAO agent ID (Incident Commander):** `ef349685-a692-4a0d-ae20-eb2e1f524624`
   ([agent page](https://agent.creao.ai/install/ef349685-a692-4a0d-ae20-eb2e1f524624?version=092e0321-8250-43be-83dc-38e5ae9aa893)).
   The other five agents are in [The agents](#the-agents).
-- **CREAO run share link (Incident Commander):** CREAO_RUN_SHARE_LINK
-  (CREAO run id `e3b669dc-2e26-4529-a669-db8e787a160d`)
+- **CREAO run share link (Incident Commander):** https://agent.creao.ai/share/46bf0fc2477da75e00d139e9eafbfb0e
+  (Aria run id `fb19956e68d744059d8773a3c300a26e`, Sun Oct 18)
 - **What the CREAO agents do:** they run the incident command during a drill. See [CREAO](#creao).
 - **Demo video:** VIDEO_LINK_HERE
 - **Built at the event:** [Built at LA Hacks](#built-at-la-hacks).

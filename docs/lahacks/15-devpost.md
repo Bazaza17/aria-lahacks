@@ -1,8 +1,7 @@
 # Devpost submission text
 
-> Paste-ready text for each Devpost field, written Sun Oct 18 ~11:15 AM. Placeholders to swap
-> before submitting: `CREAO_RUN_SHARE_LINK` (Aayush: Share on a run in the CREAO web app) and
-> `VIDEO_LINK_HERE`. Everything below is checked against the code, git or Sentry. The UI and this
+> Paste-ready text for each Devpost field, written Sun Oct 18 ~11:15 AM. Placeholder to swap
+> before submitting: `VIDEO_LINK_HERE`. Everything below is checked against the code, git or Sentry. The UI and this
 > text report rooms, not headcounts: crowds are modelled at each room's assumed capacity (NFPA).
 
 ## Project name
@@ -164,8 +163,8 @@ request calls, brief responders, and keep the signed live incident report and th
 report. The API starts them through each agent's API Trigger from TigerData events, and applies
 the `aria-actions` in their replies through the same tools `/mcp` serves.
 
-- **Run share link (Incident Commander):** CREAO_RUN_SHARE_LINK
-- **CREAO run id:** `e3b669dc-2e26-4529-a669-db8e787a160d`
+- **Run share link (Incident Commander):** https://agent.creao.ai/share/46bf0fc2477da75e00d139e9eafbfb0e
+- **Aria run id:** `fb19956e68d744059d8773a3c300a26e`
 - **Agent IDs:**
 
 | Role | Agent ID |
