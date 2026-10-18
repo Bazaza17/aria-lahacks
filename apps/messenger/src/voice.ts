@@ -1,0 +1,32 @@
+// Outbound calls: ElevenLabs places the call through Photon's SIP trunk
+// (Photon SMS & Voice number imported into ElevenLabs as a SIP-trunk number).
+import type { AgentContext } from "./eleven.ts";
+
+const { ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID, ELEVENLABS_PHONE_NUMBER_ID } = process.env;
+
+export class CallingNotConfiguredError extends Error {}
+
+export async function startCall(phone: string, context: AgentContext) {
+  if (!ELEVENLABS_PHONE_NUMBER_ID) {
+    throw new CallingNotConfiguredError("ELEVENLABS_PHONE_NUMBER_ID is not set; import the Photon voice number into ElevenLabs first");
+  }
+  const drill = context.is_drill === "true" ? "This is a drill. " : "";
+  const res = await fetch("https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call", {
+    method: "POST",
+    headers: { "xi-api-key": ELEVENLABS_API_KEY!, "content-type": "application/json" },
+    body: JSON.stringify({
+      agent_id: ELEVENLABS_AGENT_ID,
+      agent_phone_number_id: ELEVENLABS_PHONE_NUMBER_ID,
+      to_number: phone,
+      conversation_initiation_client_data: {
+        dynamic_variables: context,
+        conversation_config_override: {
+          agent: { first_message: `${drill}Hi ${context.name}, this is Aria, calling about the fire alert. Where are you right now?` },
+        },
+      },
+    }),
+  });
+  const body = (await res.json()) as { success?: boolean; message?: string; conversation_id?: string | null };
+  if (!res.ok || !body.success) throw new Error(`ElevenLabs call failed (${res.status}): ${body.message ?? JSON.stringify(body).slice(0, 300)}`);
+  return { conversationId: body.conversation_id ?? null };
+}

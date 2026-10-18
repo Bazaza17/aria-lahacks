@@ -1,0 +1,20 @@
+{
+  "name": "messenger",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx --env-file=.env src/index.ts",
+    "dev": "tsx watch --env-file=.env src/index.ts",
+    "typecheck": "tsc",
+    "agent:sync": "tsx --env-file=.env scripts/sync-agent.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@photon-ai/api": "^0.5.0"
+  }
+}
