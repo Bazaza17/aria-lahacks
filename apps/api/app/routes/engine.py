@@ -71,6 +71,8 @@ def _space_name(sid: str | None, plan: bool = False) -> str:
 
 def _opening_label(oid: str) -> str:
     o = _openings().get(oid) or {}
+    if o.get("name"):  # the human exit name the scan labels use too
+        return o["name"]
     aliases = o.get("aliases") or []
     if aliases:
         # An exterior stair reads better by what it is than by where it goes.
