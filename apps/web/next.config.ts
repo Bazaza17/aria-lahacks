@@ -13,4 +13,8 @@ const nextConfig: NextConfig = {
 export default withSentryConfig(nextConfig, {
   // Only print Sentry build logs in CI.
   silent: !process.env.CI,
+  // Send browser events, replays and traces through our own origin so ad
+  // blockers don't drop them. A fixed path (not `true`) so a future proxy.ts
+  // matcher can exclude it; there's no proxy/middleware today.
+  tunnelRoute: "/aria-relay",
 });

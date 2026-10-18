@@ -16,6 +16,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+import sentry_sdk
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -109,6 +110,9 @@ async def _captured_stream(req: AgentRunRequest) -> AsyncIterator[str]:
                     success = True
             yield sse_chunk
     except Exception as e:  # noqa: BLE001
+        # The stream has already started, so this can't become a 500. Report it
+        # to Sentry, then still tell the browser through the SSE error event.
+        sentry_sdk.capture_exception(e)
         yield f"event: error\ndata: {json.dumps({'message': f'{type(e).__name__}: {e}'})}\n\n"
         return
 
