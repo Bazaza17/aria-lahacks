@@ -113,9 +113,11 @@ def _space_state(room: dict, info: dict, t: float, burns_here: bool) -> str:
 def frames(av: AriaVenue, tl: Timeline, vt: dict, start: str, step_s: float) -> list[dict]:
     """Per-space snapshots every step_s (and the last step), from the 1 s fire frames.
 
-    layer_height_m is above the space's own floor. Inside the room of origin only the start
-    space burns and carries the HRR; its other members (the rest of a merged room) show their
-    own smoke state. A room the fire spread into burns as a whole."""
+    layer_height_m is above the space's own floor, capped at its own ceiling (a merged room's
+    layer can sit up in the skylight well); smoke_depth_m is the smoke below that ceiling.
+    Inside the room of origin only the start space burns and carries the HRR; its other members
+    (the rest of a merged room) show their own smoke state. A room the fire spread into burns
+    as a whole."""
     if step_s <= 0 or not tl.frames:
         return []
     every = max(1, round(step_s))
@@ -132,10 +134,11 @@ def frames(av: AriaVenue, tl: Timeline, vt: dict, start: str, step_s: float) -> 
             burns_here = rid != tl.start_room or sid == start
             state = _space_state(room, info, t, burns_here)
             burning_here = state in ("burning", *_FLASHED)
+            ceiling = av.height(sid)
+            layer = min(max(0.0, room["layer_height_m"] - info["floor_offset_m"]), ceiling)
             rooms[sid] = {
-                "layer_height_m": round(
-                    max(0.0, room["layer_height_m"] - info["floor_offset_m"]), 2
-                ),
+                "layer_height_m": round(layer, 2),
+                "smoke_depth_m": round(ceiling - layer, 2),
                 "layer_temp_c": room["layer_temp_c"],
                 "hrr_kw": room["hrr_kw"] if burning_here else 0,
                 "state": state,

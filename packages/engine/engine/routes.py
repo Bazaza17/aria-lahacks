@@ -125,7 +125,8 @@ def venue_timeline(
     """Fire results per venue space and opening id (merged rooms and shafts unfolded).
 
     Needs 1 s frames (the per-space times inside merged rooms and the origin limit read them).
-    With origin_space, that space is also blocked once the fire reaches origin_limit_kw.
+    With origin_space, that space is also blocked once the fire reaches origin_limit_kw (inf:
+    no limit), and it is the only member of the room of origin with an ignition time.
     """
     _check_frames(tl)
     spaces = {}
@@ -138,28 +139,32 @@ def venue_timeline(
             enters, untenable = row["smoke_enters_s"], row["smoke_untenable_s"]
             by = _untenable_by(tl, rid, untenable)
         reached = row["ignition_s"] if rid != tl.start_room else None
+        burns_here = rid != tl.start_room or origin_space in (None, sid)
         spaces[sid] = {
             "fire_room": rid,
             "floor_offset_m": round(offset, 2),
             "smoke_enters_s": enters,
             "smoke_untenable_s": untenable,
             "untenable_by": by,
-            "ignition_s": row["ignition_s"],
+            "ignition_s": row["ignition_s"] if burns_here else None,
             "flashover_s": row["flashover_s"],
             "blocked_s": _min(untenable, row["flashover_s"], reached),
         }
     origin = None
     if origin_space is not None:
         limit_s = _origin_limit_s(tl, av.room_of[origin_space], origin_limit_kw)
+        limit_kw = None if math.isinf(origin_limit_kw) else round(origin_limit_kw)
         row = spaces[origin_space]
         origin = {
             "space": origin_space,
-            "limit_kw": round(origin_limit_kw),
+            "limit_kw": limit_kw,
             "limit_s": limit_s,
             "zone_model_blocked_s": row["blocked_s"],
-            "why": f"room of origin: untenable once the fire radiates "
+            "why": "room of origin: judged by the zone model only (no radiant limit)"
+            if limit_kw is None
+            else f"room of origin: untenable once the fire radiates "
             f"{ORIGIN_RADIANT_LIMIT_KW_M2:g} kW/m² at {ORIGIN_DISTANCE_M:g} m (ISO 13571; point "
-            f"source, radiative fraction {RADIATIVE_FRACTION:g}): {origin_limit_kw:.0f} kW",
+            f"source, radiative fraction {RADIATIVE_FRACTION:g}): {limit_kw} kW",
         }
         row["origin_limit_s"] = limit_s
         row["blocked_s"] = _min(row["blocked_s"], limit_s)
