@@ -4,7 +4,7 @@ Everything goes through the real endpoints: occupants are registered, a dispatch
 drill with a fire model (simulation), and texts and call lines arrive as /live/intake/events
 envelopes. Some people never reply, so the 60 s chase kicks in. Watch it live with:
 
-    curl -N "http://localhost:8000/live/stream?building_id=e5a3fddc-e22c-431c-a5d3-ee29ef8604d1"
+    curl -N "http://localhost:8000/live/stream?building_id=547b5ec5-30c5-4f76-8080-012a52e90bd9"
 
     uv run python scripts/live_feed.py                   # play the drill
     uv run python scripts/live_feed.py --approve         # also approve the first route change, as a dispatcher
@@ -18,8 +18,7 @@ import uuid
 
 import httpx
 
-DOCK = "e5a3fddc-e22c-431c-a5d3-ee29ef8604d1"
-LINE = "+15550001111"
+VENUE = "547b5ec5-30c5-4f76-8080-012a52e90bd9"  # James West Alumni Center
 NAMES = [
     "Ana",
     "Ben",
@@ -46,13 +45,13 @@ NAMES = [
     "Wren",
     "Zoe",
 ]
-ZONES = ["main bay", "center of the bay", "back of the bay", "bay entrance", "north side", None]
+ZONES = ["Collins Room", "galleria", "Founders' Room", "Collins Patio", "networking", None]
 FIRE_MODEL = {
-    "label": "Loading dock fire (simulation)",
+    "label": "Galleria fire (simulation)",
     "steps": [
-        {"minute": 0, "place": "loading dock", "kind": "fire"},
-        {"minute": 4, "place": "main bay", "kind": "smoke"},
-        {"minute": 8, "place": "north side door", "kind": "smoke"},
+        {"minute": 0, "place": "galleria", "kind": "fire"},
+        {"minute": 4, "place": "galleria far end", "kind": "smoke"},
+        {"minute": 8, "place": "restrooms", "kind": "smoke"},
     ],
 }
 
@@ -73,7 +72,7 @@ class Pipeline:
                 "eventId": uuid.uuid4().hex,
                 "eventType": kind,
                 "source": "photon",
-                "payload": {"line": LINE, **payload},
+                "payload": {"buildingId": VENUE, **payload},
             },
         )
         r.raise_for_status()
@@ -111,15 +110,15 @@ async def main(base: str, approve: bool) -> None:
         for i, n in enumerate(NAMES)
     ]
     people[3]["mobility"] = ["wheelchair"]
-    await p.http.post(f"/buildings/{DOCK}/occupants", json={"people": people})
+    await p.http.post(f"/buildings/{VENUE}/occupants", json={"people": people})
     r = await p.http.post(
-        f"/buildings/{DOCK}/evacuations",
+        f"/buildings/{VENUE}/evacuations",
         json={
             "mode": "drill",
-            "origin": "loading dock",
+            "origin": "galleria",
             "dispatcher": "AP",
             "fire_model": FIRE_MODEL,
-            "description": "Fire drill: fire at the loading dock",
+            "description": "Fire drill: fire in the Galleria",
         },
     )
     drill = r.json()
@@ -134,12 +133,12 @@ async def main(base: str, approve: bool) -> None:
             p,
             people[0]["phone"],
             [
-                "There's fire at the loading dock and smoke is spreading into the main bay",
-                "I'm heading out through the bay entrance now",
+                "There's fire in the galleria by the sponsor booths and smoke is spreading",
+                "I'm heading out through the main entrance now",
             ],
             details={
-                "description": "Fire at the loading dock, smoke spreading",
-                "zone": "loading dock",
+                "description": "Fire in the Galleria, smoke spreading",
+                "zone": "galleria",
                 "urgency": "critical",
             },
         )
@@ -149,17 +148,17 @@ async def main(base: str, approve: bool) -> None:
         await call(
             p,
             people[8]["phone"],
-            ["I'm trapped in the north side corridor, the door won't open and there's smoke"],
+            ["I'm trapped in the restroom, the door won't open and there's smoke"],
         )
 
     async def texts():
         await asyncio.sleep(4)
         await p.text(
             people[3]["phone"],
-            "HELP I'm at the back of the bay in my wheelchair and the ramp is blocked",
+            "HELP I'm in the Founders' Room in my wheelchair and the patio doors are blocked",
         )
         await asyncio.sleep(4)
-        await p.text(people[20]["phone"], "the rear door at the dock threshold is jammed shut")
+        await p.text(people[20]["phone"], "the galleria back doors are jammed shut")
         order = [i for i in range(len(people)) if i not in (0, 3, 8, 20)]
         random.shuffle(order)
         for n, i in enumerate(order):
@@ -181,7 +180,7 @@ async def main(base: str, approve: bool) -> None:
             return
         for _ in range(30):
             await asyncio.sleep(3)
-            props = (await p.http.get(f"/buildings/{DOCK}/route-proposals")).json()
+            props = (await p.http.get(f"/buildings/{VENUE}/route-proposals")).json()
             if props:
                 d = (
                     await p.http.post(

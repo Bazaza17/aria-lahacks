@@ -63,3 +63,17 @@ def test_text_names_a_room(text: str, zone: str) -> None:
 
     jw = get_building("547b5ec5-30c5-4f76-8080-012a52e90bd9")
     assert match_place(jw, text, kinds=("zone",)) == ("zone", zone)
+
+
+@pytest.mark.parametrize("configured", ["e5a3fddc-e22c-431c-a5d3-ee29ef8604d1", None, ""])
+def test_console_opens_on_the_venue(monkeypatch, configured) -> None:
+    """An old .env naming The Dock (removed) or nothing at all still opens James West."""
+    from types import SimpleNamespace
+
+    from app.creao import buildings
+
+    monkeypatch.setattr(
+        buildings, "get_settings", lambda: SimpleNamespace(default_building_id=configured)
+    )
+    assert buildings.default_building().name == "James West Alumni Center"
+    assert [b.name for b in buildings.all_buildings().values()] == ["James West Alumni Center"]
