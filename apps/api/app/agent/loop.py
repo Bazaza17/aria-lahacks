@@ -5,17 +5,26 @@ import json
 import os
 import re
 from collections.abc import AsyncIterator
+from typing import Any
 
+import sentry_sdk
 from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam, ToolResultBlockParam
+from sentry_sdk.scope import should_send_default_pii
 
 from app.agent import streaming
 from app.agent.prompts import SYSTEM_PROMPT, ScenarioParams
+from app.brand import PRODUCT_NAME
 from app.tools.executors import execute_tool
 from app.tools.registry import TOOLS
 
 MAX_ITERATIONS = 25
 MODEL = "claude-sonnet-4-5"
+
+# Sentry AI agent monitoring: the name the Agents dashboard groups runs under.
+AGENT_NAME = f"{PRODUCT_NAME} pre-plan"
+# Tool results can be long; keep span data small.
+TOOL_RESULT_MAX_CHARS = 2000
 
 # Lazily constructed so the API can boot (and serve cached replays) even if
 # ANTHROPIC_API_KEY is missing/empty. Only a live run touches the client.
@@ -47,8 +56,40 @@ def _extract_json(text: str) -> dict | None:
         return None
 
 
+async def _execute_tool_traced(name: str, tool_input: dict[str, Any]) -> Any:
+    """Run one tool inside a Sentry gen_ai.execute_tool span."""
+    # Tools run concurrently under asyncio.gather; a fresh scope per tool keeps
+    # each span a child of the agent span instead of nesting them in each other.
+    with (
+        sentry_sdk.new_scope(),
+        sentry_sdk.start_span(op="gen_ai.execute_tool", name=f"execute_tool {name}") as span,
+    ):
+        span.set_data("gen_ai.operation.name", "execute_tool")
+        span.set_data("gen_ai.agent.name", AGENT_NAME)
+        span.set_data("gen_ai.tool.name", name)
+        if should_send_default_pii():
+            span.set_data("gen_ai.tool.call.arguments", json.dumps(tool_input, default=str))
+        result = await execute_tool(name, tool_input)
+        if should_send_default_pii():
+            span.set_data(
+                "gen_ai.tool.call.result",
+                json.dumps(result, default=str)[:TOOL_RESULT_MAX_CHARS],
+            )
+        return result
+
+
 async def run_agent(address: str, scenario_params: ScenarioParams) -> AsyncIterator[str]:
-    """Run the agent loop. Yields SSE-formatted strings."""
+    """Run the agent loop inside a Sentry gen_ai.invoke_agent span. Yields SSE strings."""
+    with sentry_sdk.start_span(op="gen_ai.invoke_agent", name=f"invoke_agent {AGENT_NAME}") as span:
+        span.set_data("gen_ai.operation.name", "invoke_agent")
+        span.set_data("gen_ai.agent.name", AGENT_NAME)
+        span.set_data("gen_ai.request.model", MODEL)
+        async for chunk in _run_agent_loop(address, scenario_params):
+            yield chunk
+
+
+async def _run_agent_loop(address: str, scenario_params: ScenarioParams) -> AsyncIterator[str]:
+    """The Claude tool loop. Yields SSE-formatted strings."""
 
     user_message = (
         f"Generate a pre-incident plan for: {address}\n\n"
@@ -94,7 +135,9 @@ async def run_agent(address: str, scenario_params: ScenarioParams) -> AsyncItera
 
         # Execute every tool call this turn
         tool_uses = [b for b in response.content if b.type == "tool_use"]
-        results = await asyncio.gather(*[execute_tool(b.name, dict(b.input)) for b in tool_uses])
+        results = await asyncio.gather(
+            *[_execute_tool_traced(b.name, dict(b.input)) for b in tool_uses]
+        )
 
         tool_results: list[ToolResultBlockParam] = []
         for block, result in zip(tool_uses, results, strict=True):
