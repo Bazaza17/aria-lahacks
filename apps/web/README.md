@@ -64,7 +64,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 NEXT_PUBLIC_MAPBOX_TOKEN=pk....
 ```
 
-Backend keys (Anthropic, Supabase service role) live in `apps/api/.env`. The frontend never sees them.
+Backend secrets (CREAO, TigerData, the tool secret, Sentry) live in `apps/api/.env`. The frontend never sees them.
 
 ## Dev
 

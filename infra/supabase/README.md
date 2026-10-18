@@ -9,7 +9,7 @@ Run these in the SQL editor, in order:
 
 | File | What it does |
 |---|---|
-| `migrations/0001_init.sql` | `buildings`, `preplans`, `tool_calls` tables. Also inserts a Miami placeholder row from the original build; it is unused (0005 clears its `is_demo`). |
+| `migrations/0001_init.sql` | `buildings`, `preplans`, `tool_calls` tables (`preplans` and `tool_calls` came from the deleted flood-era agent; nothing writes to them now). Also inserts a Miami placeholder row from the original build; it is unused (0005 clears its `is_demo`). |
 | `migrations/0002_cached_runs.sql` | `cached_runs` table (from the old replay cache; nothing writes to it now) |
 | `migrations/0004_rls.sql` | Row level security: anon can read `buildings` and `preplans` only |
 | `migrations/0005_venue.sql` | Upserts the venue row `547b5ec5-30c5-4f76-8080-012a52e90bd9` (James West Alumni Center). Replace `YOUR-PROJECT-REF` in its `scan_url` first. |

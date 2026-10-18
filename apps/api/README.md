@@ -8,7 +8,11 @@ FastAPI backend for [Aria](../../README.md). It does two jobs:
 2. **The live response layer** (`app/creao/`, `app/routes/live.py`). Incidents, people and
    exits during a drill or a fire: intake from the messenger (texts and calls), the CREAO
    command staff, route proposals the dispatcher approves, and the dispatcher console at
-   `/live/view`. Full write-up: [`docs/creao-layer.md`](../../docs/creao-layer.md).
+   `/live/view`. The six CREAO agents are started through CREAO's API Trigger and act through an
+   `aria-actions` block in their reply (`app/creao/bridge.py`), because CREAO can't attach a custom
+   MCP connector. When a drill ends, the console clears and the CREAO Scribe writes the
+   after-action report (`app/creao/after_action.py`). Full write-up, agent IDs and links:
+   [`docs/creao-layer.md`](../../docs/creao-layer.md).
 
 ## Stack
 
@@ -23,14 +27,15 @@ FastAPI backend for [Aria](../../README.md). It does two jobs:
 apps/api/
 ├── app/
 │   ├── main.py            # FastAPI app: Sentry, rate limits, CORS, routers, /mcp mount
-│   ├── ratelimit.py       # per-IP limiter (600/min default; live routes exempt)
+│   ├── ratelimit.py       # per-IP limiter (600/min default; health, intake, tools, stream, console and CREAO callback exempt; declares and clears 10/min, person actions 60/min)
 │   ├── routes/
 │   │   ├── engine.py      # GET /engine/starts, /engine/viewer, /engine/summary
 │   │   └── live.py        # /live/*: intake, stream, evacuations, approvals, console
 │   └── creao/             # the live layer: models, rules, planning, CREAO agents, MCP tools
 │       └── buildings/     # per-building profiles the live layer reads
 ├── scripts/
-│   └── creao_standin.py   # rehearse the CREAO staff without CREAO
+│   ├── build_profile.py   # regenerate app/creao/buildings/james_west.json from packages/engine/venue.json
+│   └── creao_standin.py   # rehearse the CREAO staff without CREAO (scripted, through /mcp)
 ├── tests/
 ├── Dockerfile             # built from the repo root (it copies packages/engine)
 └── dev.sh                 # uvicorn with reload on :8000

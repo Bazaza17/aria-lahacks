@@ -1,6 +1,6 @@
 # messenger
 
-Aria Alert's texting service, on the Photon 2.0 API (`@photon-ai/api`, docs: https://photon.codes/docs/beta). Design: `docs/lahacks/08-alert-design.md`.
+Aria Alert's texting service, on the Photon 2.0 API (`@photon-ai/api`, docs: https://photon.codes/docs/beta). How it joins Aria's live layer: `docs/creao-layer.md` ("For Sai: the messenger bridge").
 
 ## Environment
 
@@ -64,13 +64,12 @@ Set `ARIA_LIVE_URL` and `ARIA_TOOL_SECRET` and the messenger joins Aria's live i
   (live-mode sessions never say "DRILL") and `by` (`"dispatcher"` sends are logged as the
   dispatcher's, with their initials).
 - **Calls** are only placed to registered contacts (people who texted the line), never to a number
-  that only appears in an event (e.g. simulated occupants).
+  that only appears in an event.
 
 
 ## Going live (real Photon and ElevenLabs)
 
-Everything below was tested end to end against local fakes of both APIs (same endpoints and
-shapes), so these are the only steps left:
+To run it against the real Photon and ElevenLabs (the demo setup):
 
 1. **Keys** in `.env`: `PHOTON_PROJECT_ID`, `PHOTON_API_KEY`, `ELEVENLABS_API_KEY`,
    `ELEVENLABS_AGENT_ID`, `ELEVENLABS_PHONE_NUMBER_ID` (the Photon voice number imported into

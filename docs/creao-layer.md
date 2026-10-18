@@ -1,17 +1,22 @@
 # The CREAO layer: live incidents, exit tracking, the CREAO command staff
 
+Six CREAO agents, built on agent.creao.ai, run Aria's live response. Their agent IDs, their links
+and a run share link are under [Agent links](#agent-links).
+
 Aayush's piece of Aria. While a fire (or a labeled drill) is happening:
 
 1. **Intake.** Sai's Photon + ElevenLabs pipeline posts every text, call line and location to
    `POST /live/intake/events`. Each caller or texter who reports something becomes an incident:
    a pin on the scan with a priority, a headline and a position. Everything lands in **TigerData**.
-2. **TigerData streams it.** Triggers on `incident_events`, `evac_events` and `hazards` call
+2. **TigerData streams it.** Triggers on `comms_events`, `incident_events`, `evac_events` and `hazards` call
    `pg_notify` on every insert, so each change is streamed the moment it's written, whoever wrote
    it. The dashboard's SSE stream and the CREAO orchestrator both listen to that channel.
 3. **CREAO runs the incident.** The orchestrator wakes the CREAO **Incident Commander** (API
    Trigger) with the new events and a snapshot read from TigerData. The Commander hands tasks to
-   five specialists; they read TigerData and act through `/mcp`: pin hazards, propose routes, flag
-   life threats, and write the **live incident report**.
+   five specialists. Each run gets a snapshot read from TigerData and ends its reply with an
+   `aria-actions` block, which the API runs through the safety rules: pin hazards, propose routes,
+   flag life threats, and write the **live incident report**. When a drill ends, the Incident
+   Scribe writes the after-action report.
 4. **The dispatcher decides.** Route changes pass the safety rules, then wait for a dispatcher's
    approval before anyone is texted. Life-threat words put a human on the call, with a brief.
 
@@ -21,13 +26,13 @@ It runs on the same building and the same fire as the pre-plan:
   engine's `packages/engine/venue.json` by `scripts/build_profile.py` (`cd apps/api && uv run
   python scripts/build_profile.py`; never edit the JSON by hand). Zones are venue spaces (grouped
   under the event map's names, with their venue space ids), exits are all 14 venue exits plus the
-  stairs down from floor 2, and occupant numbers come from venue.json's default `2F_indoor`
-  scenario. Floor 2 comes from the floor plan, not the scan, and is labelled that way. There is
+  stairs down from floor 2, and each zone's assumed occupant load (NFPA capacity from venue.json's
+  default `2F_indoor` scenario, not a headcount) comes from venue.json. Floor 2 comes from the floor plan, not the scan, and is labelled that way. There is
   no assembly point: people are told to go outside, away from the building, where staff direct
   them.
 - **The engine's fire.** Declaring a drill or fire with an `origin` runs Aria's building engine
   (`app.routes.engine.run`) for that start space: the fire model's steps (smoke and untenable
-  times per zone, exit lost times), its summary (exits lost, people at risk, last out) and each
+  times per zone, exit lost times), its summary (exits lost, rooms at risk, last group out) and each
   zone's route all come from the engine (`app/creao/engine_model.py`).
 
 ```
@@ -37,13 +42,13 @@ caller/texter ─ Photon + ElevenLabs (Sai) ─> POST /live/intake/events ─> T
                          ▼                                                 ▼
      dashboard: GET /live/stream (SSE)                 orchestrator ─ API Trigger ─> CREAO Commander
      + /situation, /report, approvals                                                 │ handoff_to_agent
-                                                       /mcp tools <── Intake · Coordinator · Accountability
-                                                       (read TigerData, write proposals,   Liaison · Scribe
-                                                        hazards, report sections)
+                                                     aria-actions <── Intake · Coordinator · Accountability
+                                                     (snapshot in, actions in each reply:   Liaison · Scribe
+                                                      proposals, hazards, report sections)
 ```
 
-Code: `apps/api/app/creao/` and `apps/api/app/routes/live.py`. The pre-plan agent (`/agent/*`)
-is untouched; existing code only gains a few wiring lines in `app/main.py` (router, lifespan, `/mcp` mount).
+Code: `apps/api/app/creao/` and `apps/api/app/routes/live.py`, wired in `app/main.py` (router,
+lifespan, `/mcp` mount). The flood-era pre-plan agent (`/agent/*`) was deleted on Sun Oct 18.
 
 ## Run it locally (sandbox)
 
@@ -138,7 +143,7 @@ POST /live/intake/events
              "conversationId": "conv_…", "role": "user", "lat": 34.07, "lng": -118.44, "accuracyMeters": 8}}
 ```
 
-## For Thomas: what the dashboard reads
+## What the dashboard reads
 
 **Open drills.** The console (`/live/view`, linked as "Live response ↗" from the building page
 and the dashboard) and everything below work without a key: anyone can watch, declare a drill,
@@ -178,7 +183,9 @@ With a key: header `Authorization: Bearer <DISPATCH_API_KEYS entry>` (`?token=` 
 | `GET /live/buildings/{id}/report` (`.md`) | the live incident report, each section signed by its CREAO agent |
 | `GET /live/buildings/{id}/staff` | the CREAO org chart: each agent's status and last task, handoffs, activity |
 | `GET /live/incidents/{id}/report` | what opens when a pin is clicked: the incident, the person, the handoff brief, CREAO notes and actions on it, the signed report sections, the TigerData timeline |
-| `GET /live/view` | the dispatch console: the scan with pins, exits and people, the CREAO report drawer, **Declare drill** (origin picked from `GET /engine/starts`, fast growth) and **End**, and the engine's fire summary (origin, exits lost and when, at risk) under the header |
+| `GET /live/view` | the dispatch console: the scan with pins, exits and people, the CREAO report drawer, **Declare drill** (origin picked from `GET /engine/starts`, fast growth) and **End** (the console clears and the CREAO Scribe writes the after-action report), and the engine's fire summary (origin, exits lost and when, rooms at risk) under the header |
+| `GET /live/buildings/{id}/after-action` (`.md`) | after a drill ends: the frozen facts from TigerData and the after-action report the CREAO Scribe writes |
+| `POST /live/buildings/{id}/clear` | close leftover incidents and hazards and reset roll-call states once nothing is running (key needed after a live evacuation) |
 | `GET /live/buildings/{id}/brief` | plain-text layout facts for the phone agent (see the messenger section) |
 | `POST /live/buildings/{id}/evacuations`, `POST /live/evacuations/{id}/end` | declare / end a fire or drill: `{"mode": "drill", "origin": "140", "growth": "fast", "dispatcher": "AP"}` (origin: a venue space id or a place name) |
 | `GET /live/buildings/{id}/route-proposals`, `POST /live/route-proposals/{id}/decision` | approve / reject (409 + `replacement` if stale) |
@@ -195,7 +202,7 @@ on the rooms they name.
 
 The fire model comes from the engine. Declare with an `origin`, or set it on a running evacuation:
 `PUT /live/buildings/{id}/fire-model` with `{"engine": {"start": "140", "growth": "fast"}}`. The
-API runs the engine (cached per start and growth, about 4 s the first time) and stores:
+API runs the engine (cached per start and growth, about 1-2 s the first time) and stores:
 
 - `steps`: per zone, when smoke enters and when it becomes untenable (the engine's `fire.spaces`
   through the zone's venue spaces); per exit, when it is lost (`fire.exits`, or `fire.openings`
@@ -205,8 +212,10 @@ API runs the engine (cached per start and growth, about 4 s the first time) and 
   since the evacuation started; the nearest-safe-exit heuristic is only the fallback for a zone
   with no engine route, or when someone reports a hazard at the engine's exit. Floor 2 zones get
   the stair their route goes down, then the door it leaves by.
-- `summary`: exits lost with times, people at risk leaving now vs by the obvious way out, last
-  out, and a sentence the console and the CREAO agents quote.
+- `summary`: exits lost with times, occupied rooms and rooms at risk leaving now vs by the
+  obvious way out, when the last group is out, and a sentence the console and the CREAO agents
+  quote. Crowds are modelled at each room's assumed capacity (NFPA), not a headcount, so the
+  console reports rooms, not people.
 
 The API re-checks routes every 10 s while a fire model is active, so as exits are lost the rules
 propose changes for the dispatcher to approve. A hand-typed model still works
@@ -215,17 +224,25 @@ lose within 5 minutes is unsafe for routing. Shown everywhere as a simulation.
 
 ## CREAO setup
 
-1. **MCP connector** (once): URL `https://API/mcp`, bearer = one of `MCP_API_KEYS`.
-2. **Six agents** in CREAO, one per role (done: see the links below). Paste the instructions
-   below and grant each the connector.
-3. In the API's env: `CREAO_API_KEY` (one `capi_` key starts all six; tested), the six
+1. **Six agents** in CREAO, one per role (done: see the links below). Paste the instructions
+   below. No connector: CREAO can't attach a custom MCP connector, so each run's inputs carry
+   `snapshot` (the situation read from TigerData), `new_events` and `how_to`. The agent ends its
+   reply with an `aria-actions` block, a JSON list of tool calls. When CREAO's callback reaches
+   `POST /live/creao/run-result`, the API runs them through the same tool functions `/mcp` serves,
+   safety rules included (`bridge.apply_actions`, at most 12 per run; once a drill has ended, a
+   late reply may only write reports and notes).
+2. In the API's env: `CREAO_API_KEY` (one `capi_` key starts all six; tested), the six
    `CREAO_APP_<ROLE>` ids (already in `.env.example`), `CREAO_WEBHOOK_TOKEN` and `PUBLIC_BASE_URL`.
+3. Optional: `/mcp` (bearer = one of `MCP_API_KEYS`) still serves the same tools, for the local
+   stand-in (`scripts/creao_standin.py`) or any MCP client.
 
 **Cost control:** routine events are batched per building (`CREAO_DEBOUNCE_SECS`); a new routine
 batch waits while the last Commander run is still working; a declared fire or a caller's first
 handoff go at once; the staff's own actions never wake the staff again.
 
-| MCP tool | Does |
+The tools (in an `aria-actions` block from CREAO, or over `/mcp`; the `get_*` reads are on `/mcp` only):
+
+| Tool | Does |
 |---|---|
 | `get_building_situation`, `get_exit_flow`, `get_incident`, `get_live_report` | read TigerData |
 | `get_comms`, `get_person_thread` | texts and calls from TigerData: per-minute counts, reply rate, time to first reply; one person's whole thread |
@@ -240,16 +257,30 @@ links, not credentials. The id in the link (`/install/<id>`) is the agent's app 
 Trigger (`CREAO_APP_<ROLE>`). CREAO's docs say a `capi_` key is scoped to one agent, but ours starts
 all six (each answered a test run), so one `CREAO_API_KEY` is enough.
 
-| Role | CREAO agent |
-|---|---|
-| Incident Commander | [Aria · Incident Commander](https://agent.creao.ai/install/ef349685-a692-4a0d-ae20-eb2e1f524624?version=092e0321-8250-43be-83dc-38e5ae9aa893) |
-| Intake Analyst | [Aria · Intake Analyst](https://agent.creao.ai/install/113efaf2-fd95-4ca2-9e84-3f3481309423?version=dfe9624c-ab7e-4c35-9b4e-478429eeb9cd) |
-| Evacuation Coordinator | [Aria · Evacuation Coordinator](https://agent.creao.ai/install/e433f077-c48d-4080-8d6f-4ff771633c06?version=9b0e6560-468d-46f7-9a1a-cb89bf4d841b) |
-| Accountability Officer | [Aria · Accountability Officer](https://agent.creao.ai/install/2d6f125c-13a4-4872-a54d-0471491485f8?version=81c53a6e-fe89-4e14-90a0-8b0b547c2aaf) |
-| Responder Liaison | [Aria · Responder Liaison](https://agent.creao.ai/install/20ca703a-c164-48af-8752-69887706dd04?version=e4037f5d-ed3d-4dbf-a448-a20cf6e4411d) |
-| Incident Scribe | [Aria · Incident Scribe](https://agent.creao.ai/install/db6d854b-42ed-4df9-be21-90131c53ec3e?version=473d1852-0321-46ff-8e91-8d1118848784) |
+| Role | CREAO agent | Agent ID |
+|---|---|---|
+| Incident Commander | [Aria · Incident Commander](https://agent.creao.ai/install/ef349685-a692-4a0d-ae20-eb2e1f524624?version=092e0321-8250-43be-83dc-38e5ae9aa893) | `ef349685-a692-4a0d-ae20-eb2e1f524624` |
+| Intake Analyst | [Aria · Intake Analyst](https://agent.creao.ai/install/113efaf2-fd95-4ca2-9e84-3f3481309423?version=dfe9624c-ab7e-4c35-9b4e-478429eeb9cd) | `113efaf2-fd95-4ca2-9e84-3f3481309423` |
+| Evacuation Coordinator | [Aria · Evacuation Coordinator](https://agent.creao.ai/install/e433f077-c48d-4080-8d6f-4ff771633c06?version=9b0e6560-468d-46f7-9a1a-cb89bf4d841b) | `e433f077-c48d-4080-8d6f-4ff771633c06` |
+| Accountability Officer | [Aria · Accountability Officer](https://agent.creao.ai/install/2d6f125c-13a4-4872-a54d-0471491485f8?version=81c53a6e-fe89-4e14-90a0-8b0b547c2aaf) | `2d6f125c-13a4-4872-a54d-0471491485f8` |
+| Responder Liaison | [Aria · Responder Liaison](https://agent.creao.ai/install/20ca703a-c164-48af-8752-69887706dd04?version=e4037f5d-ed3d-4dbf-a448-a20cf6e4411d) | `20ca703a-c164-48af-8752-69887706dd04` |
+| Incident Scribe | [Aria · Incident Scribe](https://agent.creao.ai/install/db6d854b-42ed-4df9-be21-90131c53ec3e?version=473d1852-0321-46ff-8e91-8d1118848784) | `db6d854b-42ed-4df9-be21-90131c53ec3e` |
+
+The Agent ID is the id in `/install/<id>`, the same id the API Trigger uses (`CREAO_APP_<ROLE>`).
+Check it against the ID shown on each agent's page before submitting.
+
+Run share link (Incident Commander): CREAO_RUN_SHARE_LINK · CREAO run id `e3b669dc-2e26-4529-a669-db8e787a160d`
+
+The live API lists every run and action the staff took (public, phone numbers masked):
+`GET https://aria-lahacks-production.up.railway.app/live/buildings/547b5ec5-30c5-4f76-8080-012a52e90bd9/staff`.
+Its activity lines read "Started in CREAO (<run id>)" and "Aria ran N of M action(s) from the reply".
 
 ### Agent instructions
+
+> In CREAO, each run's `inputs.how_to` overrides the tool-calling parts of these instructions.
+> Reads come from `inputs.snapshot` (the situation read from TigerData) and `inputs.new_events`,
+> not from `get_*` tools. Actions go in one `aria-actions` block at the end of the reply. The
+> `get_*` tools are only on `/mcp` (the local stand-in).
 
 #### Incident Commander
 

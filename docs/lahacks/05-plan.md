@@ -1,6 +1,8 @@
 # Draft plan
 
 > A starting point to plan with Claude Code. It's built from `01-decisions.md`. Decided items are marked; the rest is open.
+>
+> **Status Sun Oct 18, ~11 AM.** Phases 0–5 and 7–8 are built. Phase 6 became the CREAO command staff (six CREAO agents run the live response; `docs/creao-layer.md`), not ASI:One agents: Fetch.ai is dropped. What's left is phase 9, the submission: see "Submission checklist" below, `15-devpost.md` and `16-demo-script.md`.
 
 ## The goal
 
@@ -16,10 +18,40 @@ The order matters more than the times. Decided: engine first, so phases 2–5 co
 3. **Routes:** safe paths from every room to every exit.
 4. **Hazards:** a fire timeline on the graph (flood as a second hazard is open).
 5. **Crowd sim:** clearance times and bottlenecks, on top of the routes.
-6. **Agents:** orchestrator + world model, hazard, evac sim and report agents, with the full flow working in ASI:One.
+6. **Agents:** orchestrator + world model, hazard, evac sim and report agents, with the full flow working in ASI:One. *(Changed: the engine does the world model, fire and routes as plain code; the agents are the six CREAO command staff on the live layer. Fetch.ai/ASI:One dropped.)*
 7. **Viewer and report:** the existing 3D viewer and report showing the computed results.
-8. **Cloud:** move the agents to a cloud host by Sunday.
-9. **Submission:** video, README, Devpost, and each track's deliverables.
+8. **Cloud:** move the agents to a cloud host by Sunday. *(Done: web on Vercel, API on Railway, CREAO agents on agent.creao.ai.)*
+9. **Submission:** video, README, Devpost, and each track's deliverables. *(In progress: "Submission checklist" below.)*
+
+## Submission checklist (Sun Oct 18, due 12:00 PM)
+
+Drafts: `15-devpost.md` (Devpost text) and `16-demo-script.md` (video script). **Never declare or end a drill on the live console unless a person is running the recording: it texts and calls real phones.**
+
+General:
+
+- [ ] **Public repo.** `Bazaza17/aria-lahacks` is private; make it public after a leaked-keys check (`security-reviewer`). Needs a person.
+- [ ] **Pre-existing code open source.** The code was ported from `Bazaza17/Aria-miami`, which is private; make it public (or publish a snapshot) and link it. Needs a person.
+- [x] License: MIT (`LICENSE`).
+- [ ] README: what it is, how to run, live links, screenshots, team, built at the event, the CREAO section (`README.md`).
+- [ ] Devpost page from `15-devpost.md`, saying which features were built at the event; opt into each prize entered.
+- [ ] Demo video, 2–3 minutes, from `16-demo-script.md`.
+- [ ] Don't commit `apps/api/creao_live.db` (local SQLite; may hold phone numbers).
+- [ ] Judging 12:30 PM, Collins Conference Room, in person.
+
+CREAO (entered):
+
+- [x] **01 Build the agent on agent.creao.ai.** Six agents, built and running (`docs/creao-layer.md`, "Agent links").
+- [ ] **02 README: agent ID + run share link.** Commander agent ID `ef349685-a692-4a0d-ae20-eb2e1f524624`. The share link comes from the CREAO app (the owner clicks Share on a run); until then the docs carry the placeholder `CREAO_RUN_SHARE_LINK`. Check that the ID on the agent's page matches, and that the shared run shows no phone numbers. A run from during a drill is better than one after End.
+- [ ] **03 Show the agent running in the demo.** The console's CREAO strip and "Show agent steps" (the same run id as the CREAO run page), a route proposal approved, the after-action report, and a short cut to the run on agent.creao.ai. See `16-demo-script.md`.
+- [ ] Pick the CREAO prize category (Disruptor, One-Person Company or Team Empowerment) on Devpost.
+
+Sentry (entered):
+
+- [x] At least 2 products beyond errors: Tracing, Session Replay, Logs, Profiling.
+- [x] Moments logged and "How Sentry shaped Aria" written (`08-sentry-moments.md`).
+- [ ] Three screenshots saved in `docs/lahacks/sentry/` (list in `08-sentry-moments.md`).
+
+Other sponsor tech in the code (opt-ins not decided; `03-tracks.md`): Photon and ElevenLabs (the messenger must be running at judging, on Sai's machine), Tiger Data, Paper, Commit Fellowship (supplemental form).
 
 ## Decisions
 
@@ -28,12 +60,12 @@ Decided: engine first, MIT license, Sentry entered (plan below), fire only (floo
 Still to make:
 
 - **Split:** Lincoln leans toward the engine (he's also doing the scan and floor plan); the rest with the team. Separate folders let three people work in parallel (see Parallel sessions in `CLAUDE.md`).
-- **Demo flow:** the 3–5 steps judges see.
+- **Demo flow:** the 3–5 steps judges see. *(Settled: the demo flow in `CLAUDE.md`; script in `16-demo-script.md`.)*
 - **Floor plan → graph:** hand-trace it, have a vision model read it, or derive it from the scan (`04-build-options.md`).
 - **Crowd sim style:** flow model, agent-based, or both; Lincoln will discuss with the team. How the fire affects the building comes first.
 - **Models:** which one does what (with the team).
-- **Agent framework:** Fetch.ai is fading, so uAgents + ASI:One is no longer a given.
-- **Other tracks:** no hard lock. Interested in many MLH challenges, Creao, Photon and ElevenLabs (quick view in `03-tracks.md`).
+- **Agent framework:** Fetch.ai is fading, so uAgents + ASI:One is no longer a given. *(Settled: CREAO; Fetch.ai dropped.)*
+- **Other tracks:** no hard lock. Interested in many MLH challenges, Creao, Photon and ElevenLabs (quick view in `03-tracks.md`). *(Creao and Sentry are entered; other opt-ins still open.)*
 - **Agent cutoff:** no fixed time, but not too late. With engine first, the agents are the late risk.
 
 ## First slice (Sat afternoon)
@@ -68,7 +100,7 @@ A sketch to argue with, not a schedule. Hacking runs 24 hours, Sat 12:00 PM to S
 
 | Track | Set up at the start | Why at the start |
 |---|---|---|
-| Fetch.ai (fading) | Agentverse and ASI:One accounts; register on the LA Hacks ASI:One Submission Agent; run `apps/agents/hello_agent.py` end to end (deleted Sun Oct 18 with `apps/agents`; in git history) | Every agent has to be registered and reachable, and the shared chat URL and profile URLs are deliverables |
+| Fetch.ai (dropped) | Agentverse and ASI:One accounts; register on the LA Hacks ASI:One Submission Agent; run `apps/agents/hello_agent.py` end to end (deleted Sun Oct 18 with `apps/agents`; in git history) | Every agent has to be registered and reachable, and the shared chat URL and profile URLs are deliverables |
 | Sentry (entered) | Two Sentry projects; the SDK in the API, agents, engine and web app (plan below) | It's judged on how observability shaped the build, so the moments have to happen during the build |
 | Devin | Claim the free credits; connect Devin to the GitHub repo after the push | Devin works through the repo |
 | Photon | Sign up for the Photon 2.0 beta and add a channel (iMessage or an SMS number) | — |
@@ -79,6 +111,8 @@ A sketch to argue with, not a schedule. Hacking runs 24 hours, Sat 12:00 PM to S
 ## Sentry plan
 
 Entered. Judges want to see how observability shaped the build, so setup goes in at the start and the proof gets collected all weekend.
+
+> **As built (Sun Oct 18):** Tracing (web and API), Session Replay (web), Logs (API) and Profiling (API). AI agent monitoring is not claimed (the Claude agent was deleted) and Uptime was not set up. The moments and the Devpost section are in `08-sentry-moments.md`.
 
 ### What to use, and where
 
@@ -108,9 +142,12 @@ Entered. Judges want to see how observability shaped the build, so setup goes in
 ## Keep track as you go
 
 - **Sentry moments:** screenshot the trace, replay or log whenever it helps you fix something, with one line on what you found. These are the Sentry submission.
-- **Fetch.ai:** save the ASI:One shared chat URL and each agent's Agentverse profile URL.
+- ~~**Fetch.ai:** save the ASI:One shared chat URL and each agent's Agentverse profile URL.~~ Dropped.
+- **CREAO:** a run share link from a drill run, and the agent ID on its page (`docs/creao-layer.md`, "Agent links").
 - **Build log:** Obsidian `03 Build Log`, for the Devpost "challenges" section.
 
 ## First message for Claude Code
+
+(Used at kickoff on Sat; setup is done.)
 
 > Read `CLAUDE.md` and `docs/lahacks/00-start-here.md`, then everything it links. Summarize the goal and the changes in `07-changes.md` back to me in a few lines. Then do the kickoff in `CLAUDE.md`: ask me everything that's still pending, then help me set up the new Supabase project, Mapbox and the env files. No feature code until I say go.
