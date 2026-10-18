@@ -556,6 +556,8 @@ type ExitMarker = {
   fills: THREE.Mesh[];
   holders: THREE.Group[];
   label: HTMLElement;
+  /** The CSS2D object holding the label: its .visible is what CSS2DRenderer honours. */
+  labelObject: CSS2DObject;
   status: HTMLElement;
   lost: boolean | null;
 };
@@ -637,7 +639,17 @@ export function buildExitLayer(
     label.center.set(0.5, 1);
     label.position.set(mid.x, mid.y + EXIT_LABEL_LIFT_M, mid.z);
     root.add(label);
-    markers.push({ group: g, meshes, fills, holders, label: el, status, lost: null });
+    label.visible = false; // names start hidden; the scan's "Show exit names" button shows them
+    markers.push({
+      group: g,
+      meshes,
+      fills,
+      holders,
+      label: el,
+      labelObject: label,
+      status,
+      lost: null,
+    });
   }
 
   const paint = (m: ExitMarker) => {
@@ -676,7 +688,8 @@ export function buildExitLayer(
       for (const m of markers) paint(m);
     },
     setLabelsVisible: (visible) => {
-      for (const m of markers) m.label.style.display = visible ? "" : "none";
+      // CSS2DRenderer rewrites style.display every frame from the object's visibility.
+      for (const m of markers) m.labelObject.visible = visible;
     },
     pick: (raycaster) => {
       const hit = raycaster.intersectObjects(hits, false)[0];
