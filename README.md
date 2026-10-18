@@ -23,7 +23,7 @@ Built at LA Hacks 2026 (Sat Oct 17 – Sun Oct 18) by Lincoln, Aayush Pal and Sa
 - **CREAO run share link (Incident Commander):** https://agent.creao.ai/share/46bf0fc2477da75e00d139e9eafbfb0e
   (Aria run id `fb19956e68d744059d8773a3c300a26e`, Sun Oct 18)
 - **What the CREAO agents do:** they run the incident command during a drill. See [CREAO](#creao).
-- **Demo video:** VIDEO_LINK_HERE
+- **Demo video:** https://www.youtube.com/watch?v=XaDfIjDk314
 - **Built at the event:** [Built at LA Hacks](#built-at-la-hacks).
 - **Sponsor tech:** [Sentry](#sentry), [TigerData](#tigerdata), [Photon](#photon), [ElevenLabs](#elevenlabs).
 
@@ -31,7 +31,7 @@ Built at LA Hacks 2026 (Sat Oct 17 – Sun Oct 18) by Lincoln, Aayush Pal and Sa
 
 | What | Link |
 |---|---|
-| Demo video | VIDEO_LINK_HERE |
+| Demo video | https://www.youtube.com/watch?v=XaDfIjDk314 |
 | Web app | https://aria-lahacks.vercel.app |
 | Venue on the map | https://aria-lahacks.vercel.app/dashboard |
 | Building page (scan, fire start, size-up) | https://aria-lahacks.vercel.app/building/547b5ec5-30c5-4f76-8080-012a52e90bd9 |

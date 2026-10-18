@@ -1,7 +1,7 @@
 # Devpost submission text
 
 > Paste-ready text for each Devpost field, written Sun Oct 18 ~11:15 AM. Placeholder to swap
-> before submitting: `VIDEO_LINK_HERE`. Everything below is checked against the code, git or Sentry. The UI and this
+> before submitting: `https://www.youtube.com/watch?v=XaDfIjDk314`. Everything below is checked against the code, git or Sentry. The UI and this
 > text report rooms, not headcounts: crowds are modelled at each room's assumed capacity (NFPA).
 
 ## Project name
@@ -253,7 +253,7 @@ emergency-routing apps).
 - Live site: https://aria-lahacks.vercel.app
 - Live dispatcher console: https://aria-lahacks.vercel.app/live/view
 - API health: https://aria-lahacks-production.up.railway.app/health
-- Video: VIDEO_LINK_HERE
+- Video: https://www.youtube.com/watch?v=XaDfIjDk314
 
 ---
 
