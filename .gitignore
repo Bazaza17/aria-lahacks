@@ -72,3 +72,15 @@ Thumbs.db
 apps/api/*.db
 # Demo video script (kept local, not published)
 docs/lahacks/16-demo-script.md
+
+# Internal docs and notes (kept local, not published). READMEs, the README screenshots and the
+# voice agent's knowledge file stay in the repo.
+docs/*
+!docs/img/
+*.md
+!README.md
+!**/README.md
+!apps/messenger/knowledge/*.md
+# Technical docs the READMEs link to
+!docs/creao-layer.md
+!packages/engine/VENUE.md
