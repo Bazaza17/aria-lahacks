@@ -20,4 +20,4 @@ export const LEGAL = {
   copyrightYear: 2026,
 } as const;
 
-export const COPYRIGHT_NOTICE = `Copyright © ${LEGAL.copyrightYear} ${LEGAL.owner}. MIT License.`;
+export const COPYRIGHT_NOTICE = `Copyright © ${LEGAL.copyrightYear} ${LEGAL.owner}. All rights reserved.`;

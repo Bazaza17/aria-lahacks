@@ -429,4 +429,4 @@ shows Declare drill (don't press it on the live site: it texts and calls real ph
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+Copyright © 2026 Lincoln Bazail, Aayush Pal and Saikarthik Magham. All rights reserved.
