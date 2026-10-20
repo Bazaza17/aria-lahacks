@@ -26,7 +26,7 @@ TOOL = {"X-Tool-Secret": SECRET}
 
 @pytest.fixture
 def settings(monkeypatch):
-    s = Settings(dispatch_keys={KEY}, tool_secret=SECRET, cloud=True)
+    s = Settings(dispatch_keys={KEY}, tool_secret=SECRET, cloud=True, public_drills=True)
     for mod in (auth, live):
         monkeypatch.setattr(mod, "get_settings", lambda: s)
     return s
@@ -251,3 +251,10 @@ async def test_clear_closes_leftovers_with_nothing_running(client):
     # nothing to clear mid-evacuation: ending it clears
     await _declare(client)
     assert (await client.post(f"/live/buildings/{VENUE}/clear", json={})).status_code == 409
+
+
+async def test_public_drills_off_by_default_refuses_keyless_declares(client, settings, monkeypatch):
+    monkeypatch.setattr(live, "get_settings", lambda: replace(settings, public_drills=False))
+    r = await _declare(client)
+    assert r.status_code == 403
+    assert (await _declare(client, headers=DISPATCHER)).status_code == 200

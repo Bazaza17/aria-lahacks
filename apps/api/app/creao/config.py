@@ -33,6 +33,8 @@ class Settings:
     cloud: bool = False  # SENTRY_ENVIRONMENT=cloud: a missing key is an error, never "open"
     # Open drills: anyone may declare one, so a drill ends itself after this long
     drill_max_minutes: float = 20.0
+    # Keyless drills text and call real phones, so they're off unless PUBLIC_DRILLS=1
+    public_drills: bool = False
 
 
 @lru_cache
@@ -69,4 +71,5 @@ def get_settings() -> Settings:
         dispatcher_phone=env("DISPATCHER_PHONE") or None,
         cloud=env("SENTRY_ENVIRONMENT", "laptop") == "cloud",
         drill_max_minutes=float(env("DRILL_MAX_MINUTES") or Settings.drill_max_minutes),
+        public_drills=env("PUBLIC_DRILLS", "").strip().lower() in ("1", "true", "yes"),
     )

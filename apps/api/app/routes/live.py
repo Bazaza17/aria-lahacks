@@ -649,13 +649,15 @@ class EvacuationIn(BaseModel):
 async def start_evacuation(
     request: Request, building_id: str, body: EvacuationIn, session: Session, privileged: Privileged
 ) -> dict:
-    """Open drills: anyone may declare a drill at one of the venue's places when none is running;
-    "live" and a hand-typed fire model need the key."""
+    """Open drills (PUBLIC_DRILLS=1): anyone may declare a drill at one of the venue's places when
+    none is running; "live" and a hand-typed fire model need the key."""
     building = _building(building_id)
     if privileged:
         return await _declare(session, building, body, body.fire_model)
     if body.mode == "live":
         raise HTTPException(401, "Dispatcher key required to declare a live evacuation")
+    if not get_settings().public_drills:
+        raise HTTPException(403, "Drills are paused: the LA Hacks demo is over")
     if not _known_origin(building, body.origin):
         raise HTTPException(422, "Pick where the fire starts from the venue's places")
     async with _declare_locks.setdefault(building.id, asyncio.Lock()):

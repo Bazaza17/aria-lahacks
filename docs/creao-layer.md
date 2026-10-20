@@ -145,7 +145,7 @@ POST /live/intake/events
 
 ## What the dashboard reads
 
-**Open drills.** The console (`/live/view`, linked as "Live response ↗" from the building page
+**Open drills (paused since LA Hacks; set `PUBLIC_DRILLS=1` to turn them back on).** The console (`/live/view`, linked as "Live response ↗" from the building page
 and the dashboard) and everything below work without a key: anyone can watch, declare a drill,
 end it, approve routes, re-text, call, assign and take a handoff. The guardrails:
 
